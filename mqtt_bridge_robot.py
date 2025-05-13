@@ -117,6 +117,10 @@ class ros2_mqtt_publisher_t(Node):
         
         # Make a dictionary with the data we want
         sanitized_data = {
+            # We get the timestamp specifically from GPS for real time position precision
+            "timestamp": msg.header.stamp.sec,
+            # ~!!!
+            
             "latitude": msg.latitude,
             "longitude": msg.longitude,
             "altitude": msg.altitude
