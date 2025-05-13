@@ -1,0 +1,308 @@
+import json
+import paho.mqtt.client as mqtt
+from  paho.mqtt.client import MQTTMessage
+
+import rclpy
+from rclpy.node import Node
+
+from dataclasses import dataclass
+from collections import defaultdict
+from enum import Enum
+import threading
+import time
+
+# Configuration -- START
+
+# MQTT Specs
+MQTT_DEFAULT_HOST = "localhost"
+MQTT_DEFAULT_PORT = 1883
+MQTT_DEFAULT_TIMEOUT = 120
+
+# MQTT topics where the data is being sent to
+JSON_GPS_TOPIC = "gps/json"
+JSON_TEMPERATURE_TOPIC = "temperature/json"
+JSON_NDVI_TOPIC = "ndvi/json"
+
+JSON_ROBOT_DATA_01 = "robot/json"
+
+# MQTT Topics this node listens to
+MQTT_TOPIC_GPS = "mqtt/gps"
+MQTT_TOPIC_TEMPERATURE = "mqtt/temperature"
+MQTT_TOPIC_NDVI = "mqtt/ndvi"
+
+# Regex
+GET_FLOAT_NUMBER = r'\d+\.\d+'
+GET_TEMPERATURE_DATA = rf'([^":]+):|({GET_FLOAT_NUMBER})'
+
+# Conditions
+DEFAULT_PUBLISH = False
+
+# ros_data_t msg types
+class msg_type(Enum):
+    GPS = 0
+    TEMPERATURE = 1
+    NDVI = 2
+
+# Configuration -- END
+
+# ---------------------- WHOLE SOURCE STARTS HERE ----------------------
+
+# SUMMARY -- START
+
+"""
+SERVERSIDE - THIS SCRIPT MUST BE EXECUTED ON THE SERVER!!!
+
+This code subscribes to specified MQTT topics and publishes the received data. 
+It includes predefined callback functions that intercept the incoming messages.
+
+Upon interception, the messages are processed and transferred to a 
+global data class, making the data available in real-time.
+
+This approach allows the generation of custom JSON data containing values 
+from the subscribed topics, providing flexibility in selecting
+the specific information to be made available.
+"""
+
+# SUMMARY -- END
+
+# This class helps on the access fast deliver members in a json-compatible format  
+class json_wrapper_t:
+    
+    def __init__(self, name, value):
+        self._name = name
+        self._value = value
+    
+    # To be able to remove 'outer' braces, so we can do :
+    # class.member
+    # class.member.json
+    
+    # Without back and forth braces
+    @property
+    def json(self):
+            return dict({self._name : self._value})
+
+    def __getattr__(self, attr): 
+        return getattr(self._value, attr)
+
+    def __str__(self):
+        return str(self._value)
+
+    def __repr__(self):
+        return repr(self._value)
+
+    def __int__(self):
+        return int(self._value)
+
+    def __float__(self):
+        return float(self._value)
+
+    def __eq__(self, other):
+        return self._value == other
+
+    def __add__(self, other):
+        return self._value + other
+
+    @property
+    def value(self):
+        return self._value
+
+# A helper class to store and update data from ROS messages.
+@dataclass
+class ros_data_t:
+    
+    # Gps data
+    g_timestamp: int = None 
+    
+    g_latitude: float = None
+    g_longitude: float = None
+    g_altitude: float = None
+    
+    # Temperature data
+    t_entity_count: str = None
+    t_temperature: float = None
+    t_cswi: float = None
+    
+    # NDVI data
+    n_ndvi: float = None
+    n_ndvi_3d: float = None
+    n_ir: float = None
+    n_visible: float = None
+    
+    # Update the internal data fields based on incoming data.
+    def update(self, data: dict):
+        type = data["msg_type"] 
+        
+        if type == msg_type.GPS:
+            self.g_timestamp = data["timestamp"]
+            
+            self.g_latitude = data["latitude"]
+            self.g_longitude = data["longitude"]
+            self.g_altitude = data["altitude"]
+            
+        elif type == msg_type.TEMPERATURE:
+            self.t_entity_count = data["entity_count"]
+            self.t_temperature = data["temperature"]
+            self.t_cswi = data["cwsi"]
+            
+        elif type == msg_type.NDVI:
+            self.n_ndvi = data["ndvi"]
+            self.n_ndvi_3d = data["ndvi_3d"]
+            self.n_ir = data["ir"]
+            self.n_visible = data["visible"]
+            
+        else:
+            raise ValueError(f"Unsupported msg_type: {type}")
+    
+    def __getattribute__(self, name: str) -> json_wrapper_t:
+        value = super().__getattribute__(name)
+        
+        if name.startswith('_') or callable(value):
+            return value
+
+        return json_wrapper_t(name[2:], value)
+    
+    # Data wrappers to get data in bulk in a more strict way.
+    # having the hability to delete members fora more comfortable usage <soon>
+    def get(self, type):
+        
+        ### IMPORTANT ###
+        # Python recognized the pattern (json,json,json) as a set, so we use **
+        # to concatenate as a dictionary so it doesn't throw errors
+        match type:
+            case msg_type.GPS:
+                return {"gps":{**self.g_latitude.json,
+                               **self.g_longitude.json,
+                               **self.g_altitude.json}}
+
+            case msg_type.TEMPERATURE:
+                return {"temperature":{**self.t_entity_count.json,
+                                       **self.t_temperature.json,
+                                       **self.t_cswi.json}}
+                
+
+            case msg_type.NDVI:
+                return {"ndvi":{**self.n_ndvi.json,
+                                **self.n_ndvi_3d.json,
+                                **self.n_ir.json,
+                                **self.n_visible.json}}
+
+# Main class for the ROS 2 node that publishes received MQTT messages to an MQTT broker.
+# After that, we just listen with Telegraf and InfluxDB processes everything
+class mqtt_data_uploader_t(Node):
+
+    # Where all the data is stored locally, in order to update it in the data_looper.
+    data_bulk = defaultdict(lambda: None)
+    
+    # Initialize the ROS 2 node, instantiate shared data container,
+    # subscribe to topics, and connect to MQTT broker.
+    def __init__(self, host=MQTT_DEFAULT_HOST, port=MQTT_DEFAULT_PORT):
+        super().__init__('ros2_mqtt_publisher')
+
+        # Instantiate shared data container
+        self.ros_data = ros_data_t()
+
+        # Initialize and connect the MQTT client
+        self.mqtt_client_robot = mqtt.Client()
+        self.mqtt_client_server = mqtt.Client()
+        
+        try:
+            # We use our client to publish the data and we use the robot client to collect it.
+            self.mqtt_client_server.connect(MQTT_DEFAULT_HOST, MQTT_DEFAULT_PORT, MQTT_DEFAULT_TIMEOUT)
+            self.get_logger().info(f"Connected to our MQTT client")
+            
+            self.mqtt_client_robot.connect(host, port, MQTT_DEFAULT_TIMEOUT)
+            self.get_logger().info(f"Connected to Foreign MQTT broker at {host}:{port}")
+            
+            # Subscribe to required MQTT topics
+            self.subscribe_to_topics()
+            
+            # We launch a infinite thread to our data looper so 
+            # we can publish data independently
+            thread = threading.Thread(target=self.data_looper)
+            thread.start()
+            
+        except Exception as e:
+            self.get_logger().error(f"Failed to connect to MQTT broker: {e}")
+
+        # Start MQTT client loop
+        self.mqtt_client_robot.loop_start()
+        self.mqtt_client_server.loop_start()
+
+    # Sets up ROS topic subscriptions with appropriate message types and callbacks.
+    def subscribe_to_topics(self) -> None:
+        qos = 0
+        self.mqtt_client_robot.subscribe(MQTT_TOPIC_GPS, qos)
+        self.mqtt_client_robot.subscribe(MQTT_TOPIC_TEMPERATURE, qos)  
+        self.mqtt_client_robot.subscribe(MQTT_TOPIC_NDVI, qos)                       
+        
+        # Let the robot client get the callback so we can get the values from the topics
+        # we got subscribed to
+        self.mqtt_client_robot.on_message = self.on_mqtt_message
+    
+    # This is the main callback to get all the data from the subscribed topics
+    def on_mqtt_message(self, client, userdata, msg: MQTTMessage):
+        self.global_data_update(self.get_msg_type_by_topic(msg.topic), json.loads(msg.payload.decode("utf-8")))
+    
+    def get_msg_type_by_topic(self, topic_name) -> msg_type:
+        return {
+            MQTT_TOPIC_GPS: msg_type.GPS,
+            MQTT_TOPIC_TEMPERATURE: msg_type.TEMPERATURE,
+            MQTT_TOPIC_NDVI: msg_type.NDVI}.get(topic_name)
+        
+    # Publishes the given data to the specified MQTT topic.
+    def publish(self, topic: str, data: dict) -> None:
+        if data is not None:
+            payload = json.dumps(data, indent=4)
+            self.mqtt_client_server.publish(topic, payload)
+            self.get_logger().info(f"Published to MQTT Topic -> {topic} the data : {payload}")
+
+    # Updates the global ROS data container with new parsed values.
+    def global_data_update(self, msg_type: msg_type, data: dict) -> None:
+        self.ros_data.update({"msg_type": msg_type, **data})
+        self.data_bulk[msg_type.value] = data
+        
+    def robot_message_01(self) -> str:
+        rd_handler = self.ros_data
+        
+        custom_json = {"robot_data":{**rd_handler.g_timestamp.json,
+                                     **rd_handler.get(msg_type.GPS),
+                                     **rd_handler.t_temperature.json}}
+        
+        print(json.dumps(custom_json, indent=4))
+        #return custom_json
+
+    # The looper function will be the main stream.
+    # Where all the json data is being published
+    def data_looper(self) -> None:
+        
+        while True:
+            
+            self.publish(JSON_ROBOT_DATA_01, self.robot_message_01())
+
+            if DEFAULT_PUBLISH:
+                self.publish(JSON_GPS_TOPIC, self.data_bulk[msg_type.GPS.value])
+                self.publish(JSON_TEMPERATURE_TOPIC, self.data_bulk[msg_type.TEMPERATURE.value])
+                self.publish(JSON_NDVI_TOPIC, self.data_bulk[msg_type.NDVI.value])
+
+def main(args=None):
+    # Main entry point for running the ROS 2 node.
+    rclpy.init(args=args)
+
+    node = mqtt_data_uploader_t("192.168.13.146")
+
+    try:
+        rclpy.spin(node)  # Start processing callbacks
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.mqtt_client_robot.disconnect()
+        node.mqtt_client_server.disconnect()
+        node.get_logger().info("Disconnected from MQTT broker.")
+        node.destroy_node()
+        rclpy.shutdown()
+
+# Ensure script can be run standalone
+if __name__ == '__main__':
+    main()
+
+# ---------------------- WHOLE SOURCE ENDS HERE ----------------------
