@@ -162,29 +162,25 @@ class ros_data_t:
         return json_wrapper_t(name[2:], value)
     
     # Data wrappers to get data in bulk in a more strict way.
-    # having the hability to delete members fora more comfortable usage <soon>
-    def get(self, type):
+    def get(self, type, with_key=True):
+        config = {
+            msg_type.GPS: ("gps", [self.g_latitude.json, self.g_longitude.json, self.g_altitude.json]),
+            msg_type.TEMPERATURE: ("temperature", [self.t_entity_count.json, self.t_temperature.json, self.t_cswi.json]),
+            msg_type.NDVI: ("ndvi", [self.n_ndvi.json, self.n_ndvi_3d.json, self.n_ir.json, self.n_visible.json])
+        }
+
+        if type not in config:
+            raise ValueError("Unsupported message type")
+
+        key, json_parts = config[type]
+        merged_data = {}
         
-        ### IMPORTANT ###
-        # Python recognized the pattern (json,json,json) as a set, so we use **
-        # to concatenate as a dictionary so it doesn't throw errors
-        match type:
-            case msg_type.GPS:
-                return {"gps":{**self.g_latitude.json,
-                               **self.g_longitude.json,
-                               **self.g_altitude.json}}
+        for part in json_parts:
+            merged_data.update(part)
 
-            case msg_type.TEMPERATURE:
-                return {"temperature":{**self.t_entity_count.json,
-                                       **self.t_temperature.json,
-                                       **self.t_cswi.json}}
-                
+        return {key: merged_data} if with_key else merged_data
 
-            case msg_type.NDVI:
-                return {"ndvi":{**self.n_ndvi.json,
-                                **self.n_ndvi_3d.json,
-                                **self.n_ir.json,
-                                **self.n_visible.json}}
+
 
 # Main class for the ROS 2 node that publishes received MQTT messages to an MQTT broker.
 # After that, we just listen with Telegraf and InfluxDB processes everything
@@ -264,11 +260,48 @@ class mqtt_data_uploader_t(Node):
     def robot_message_01(self) -> str:
         rd_handler = self.ros_data
         
+        accumulated_ndvi_data = {"analyzed_ndvi_data": {}}
+        
+        # Get before counting
+        accumulated_ndvi_data["analyzed_ndvi_data"]["before_analysis"] = rd_handler.get(msg_type.NDVI, False)
+        
+        second_count = 1
+        start_time = time.time()
+        last_logged_second = 0
+        sample_number = 1
+        
+        # Wait in the loop until 5 second has passed
+        while (time_passed := (time.time() - start_time)) < 5.0:
+            current_second = int(time_passed)
+            #print({current_second:{last_logged_second:second_count}})
+            
+            sec_key = f"second_{second_count}"
+            
+            if sec_key not in accumulated_ndvi_data["analyzed_ndvi_data"]:
+                accumulated_ndvi_data["analyzed_ndvi_data"][sec_key] = {}
+                    
+            if (len(accumulated_ndvi_data["analyzed_ndvi_data"][sec_key])) != 2: # temporally, for testing
+                sample_key = f"sample_n_{sample_number}"
+                    
+                accumulated_ndvi_data["analyzed_ndvi_data"][sec_key][sample_key] = rd_handler.get(msg_type.NDVI, False)
+            
+            sample_number += 1
+            
+            if current_second > last_logged_second:
+                last_logged_second = current_second
+                second_count += 1
+                sample_number = 1
+        
+        # Get after counting
+        accumulated_ndvi_data["analyzed_ndvi_data"]["after_analysis"] = rd_handler.get(msg_type.NDVI, False)
+        
         custom_json = {"robot_data":{**rd_handler.g_timestamp.json,
                                      **rd_handler.get(msg_type.GPS),
-                                     **rd_handler.t_temperature.json}}
+                                     **rd_handler.t_temperature.json,
+                                     **accumulated_ndvi_data}}
         
         print(json.dumps(custom_json, indent=4))
+        
         #return custom_json
 
     # The looper function will be the main stream.
@@ -288,7 +321,7 @@ def main(args=None):
     # Main entry point for running the ROS 2 node.
     rclpy.init(args=args)
 
-    node = mqtt_data_uploader_t("192.168.13.146")
+    node = mqtt_data_uploader_t("192.168.13.26")
 
     try:
         rclpy.spin(node)  # Start processing callbacks
