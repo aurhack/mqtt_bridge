@@ -312,12 +312,13 @@ class mqtt_data_uploader_t(Node):
         accumulated_ndvi_data["analyzed_ndvi_data"]["before_analysis"] = rd_handler.get(msg_type.NDVI, False)
         
         second_count = 1
-        last_logged_second = -1
+        last_logged_second = 0
         data_samples = []
         start_time = time.time()
         finish_line = 5
 
-        while (time_passed := int(time.time() - start_time)) < finish_line:
+        while (time_passed := int(time.time() - start_time)) <= finish_line:
+            
             new_ndvi_data = rd_handler.get(msg_type.NDVI, False, True)
             
             if new_ndvi_data is not None and len(data_samples) < 10:
