@@ -6,7 +6,7 @@ import rclpy
 from rclpy.node import Node
 
 from dataclasses import dataclass
-from collections import defaultdict
+from collections import OrderedDict, defaultdict
 from enum import Enum
 import threading
 import time
@@ -106,63 +106,106 @@ class json_wrapper_t:
     def value(self):
         return self._value
 
+# Class made for hashing purposes, to get unique and ordered data inside
+# it's not necessary to create a class for each topic, we could too, but implementation
+# could be harder and maybe even complex, we need to keep the code clean and faster
+
+# IMPORTANT : This is just a helper class, is not meant to work on a native case 
+# it doesn't support a normal constructor based on the normal functionality of the whole source
+# It's made for 'robot_message_01'
+class ndvi_data_hashable_t:
+
+    def __init__(self, json_data:json):
+        self.ndvi = json_data["ndvi"]
+        self.ndvi_3d = json_data["ndvi_3d"]
+        self.ir = json_data["ir"]
+        self.visible = json_data["visible"]
+        
+    def __eq__(self, other):
+        if not isinstance(other, ndvi_data_hashable_t):
+            return False
+        return (self.ndvi == other.ndvi and
+                self.ndvi_3d == other.ndvi_3d and
+                self.ir == other.ir and
+                self.visible == other.visible)
+        
+    def to_json(self):
+        return {"ndvi":self.ndvi,
+                           "ndvi_3d":self.ndvi_3d,
+                           "ir":self.ir,
+                           "visible":self.visible}
+
+    def __hash__(self):
+        return hash((self.ndvi, self.ndvi_3d, self.ir, self.visible))
+    
+    def __iter__(self):
+       yield self.ndvi
+       yield self.ndvi_3d
+       yield self.ir
+       yield self.visible
+
+
 # A helper class to store and update data from ROS messages.
+from dataclasses import dataclass, field
+from typing import Any, Dict
+from collections import OrderedDict
+
 @dataclass
 class ros_data_t:
-    
-    # Gps data
+    # Raw fields (auto-wrapped via __getattribute__)
     g_timestamp: int = None 
-    
     g_latitude: float = None
     g_longitude: float = None
     g_altitude: float = None
-    
-    # Temperature data
+
     t_entity_count: str = None
     t_temperature: float = None
     t_cswi: float = None
-    
-    # NDVI data
+
     n_ndvi: float = None
     n_ndvi_3d: float = None
     n_ir: float = None
     n_visible: float = None
-    
-    # Update the internal data fields based on incoming data.
+
+    # Internal change flags
+    _changed_flags: Dict[str, bool] = field(default_factory=lambda: {
+        "gps": False,
+        "temperature": False,
+        "ndvi": False
+    }, init=False)
+
     def update(self, data: dict):
-        type = data["msg_type"] 
-        
-        if type == msg_type.GPS:
+        msg = data["msg_type"]
+        if msg == msg_type.GPS:
             self.g_timestamp = data["timestamp"]
-            
             self.g_latitude = data["latitude"]
             self.g_longitude = data["longitude"]
             self.g_altitude = data["altitude"]
-            
-        elif type == msg_type.TEMPERATURE:
+            self._changed_flags["gps"] = True
+
+        elif msg == msg_type.TEMPERATURE:
             self.t_entity_count = data["entity_count"]
             self.t_temperature = data["temperature"]
             self.t_cswi = data["cwsi"]
-            
-        elif type == msg_type.NDVI:
+            self._changed_flags["temperature"] = True
+
+        elif msg == msg_type.NDVI:
             self.n_ndvi = data["ndvi"]
             self.n_ndvi_3d = data["ndvi_3d"]
             self.n_ir = data["ir"]
             self.n_visible = data["visible"]
-            
+            self._changed_flags["ndvi"] = True
+
         else:
-            raise ValueError(f"Unsupported msg_type: {type}")
-    
-    def __getattribute__(self, name: str) -> json_wrapper_t:
+            raise ValueError(f"Unsupported msg_type: {msg}")
+
+    def __getattribute__(self, name: str) -> Any:
         value = super().__getattribute__(name)
-        
         if name.startswith('_') or callable(value):
             return value
-
         return json_wrapper_t(name[2:], value)
-    
-    # Data wrappers to get data in bulk in a more strict way.
-    def get(self, type, with_key=True):
+
+    def get(self, type, with_key=True, only_if_changed=False):
         config = {
             msg_type.GPS: ("gps", [self.g_latitude.json, self.g_longitude.json, self.g_altitude.json]),
             msg_type.TEMPERATURE: ("temperature", [self.t_entity_count.json, self.t_temperature.json, self.t_cswi.json]),
@@ -173,8 +216,15 @@ class ros_data_t:
             raise ValueError("Unsupported message type")
 
         key, json_parts = config[type]
+
+        # Return nothing if not changed (and only_if_changed=True)
+        if only_if_changed and not self._changed_flags[key]:
+            return None
+
+        # Reset the changed flag after fetching
+        self._changed_flags[key] = False
+
         merged_data = {}
-        
         for part in json_parts:
             merged_data.update(part)
 
@@ -185,9 +235,6 @@ class ros_data_t:
 # Main class for the ROS 2 node that publishes received MQTT messages to an MQTT broker.
 # After that, we just listen with Telegraf and InfluxDB processes everything
 class mqtt_data_uploader_t(Node):
-
-    # Where all the data is stored locally, in order to update it in the data_looper.
-    data_bulk = defaultdict(lambda: None)
     
     # Initialize the ROS 2 node, instantiate shared data container,
     # subscribe to topics, and connect to MQTT broker.
@@ -212,9 +259,7 @@ class mqtt_data_uploader_t(Node):
             # Subscribe to required MQTT topics
             self.subscribe_to_topics()
             
-            # We launch a infinite thread to our data looper so 
-            # we can publish data independently
-            thread = threading.Thread(target=self.data_looper)
+            thread = threading.Thread(target=self.robot_message_01)
             thread.start()
             
         except Exception as e:
@@ -237,7 +282,7 @@ class mqtt_data_uploader_t(Node):
     
     # This is the main callback to get all the data from the subscribed topics
     def on_mqtt_message(self, client, userdata, msg: MQTTMessage):
-        self.global_data_update(self.get_msg_type_by_topic(msg.topic), json.loads(msg.payload.decode("utf-8")))
+        self.ros_data.update({"msg_type": self.get_msg_type_by_topic(msg.topic), **json.loads(msg.payload.decode("utf-8"))})
     
     def get_msg_type_by_topic(self, topic_name) -> msg_type:
         return {
@@ -251,71 +296,85 @@ class mqtt_data_uploader_t(Node):
             payload = json.dumps(data, indent=4)
             self.mqtt_client_server.publish(topic, payload)
             self.get_logger().info(f"Published to MQTT Topic -> {topic} the data : {payload}")
-
-    # Updates the global ROS data container with new parsed values.
-    def global_data_update(self, msg_type: msg_type, data: dict) -> None:
-        self.ros_data.update({"msg_type": msg_type, **data})
-        self.data_bulk[msg_type.value] = data
-        
+    
+    
     def robot_message_01(self) -> str:
+        def count_repeats(sequence):
+            counts = OrderedDict()
+            for item in sequence:
+                counts[item] = counts.get(item, 0) + 1
+            return counts
+
         rd_handler = self.ros_data
-        
         accumulated_ndvi_data = {"analyzed_ndvi_data": {}}
         
-        # Get before counting
+        # Before analysis snapshot
         accumulated_ndvi_data["analyzed_ndvi_data"]["before_analysis"] = rd_handler.get(msg_type.NDVI, False)
         
         second_count = 1
+        last_logged_second = -1
+        data_samples = []
         start_time = time.time()
-        last_logged_second = 0
-        sample_number = 1
-        
-        # Wait in the loop until 5 second has passed
-        while (time_passed := (time.time() - start_time)) < 5.0:
-            current_second = int(time_passed)
-            #print({current_second:{last_logged_second:second_count}})
+        finish_line = 5
+
+        while (time_passed := int(time.time() - start_time)) < finish_line:
+            new_ndvi_data = rd_handler.get(msg_type.NDVI, False, True)
             
-            sec_key = f"second_{second_count}"
+            if new_ndvi_data is not None and len(data_samples) < 10:
+                data_samples.append(ndvi_data_hashable_t(new_ndvi_data))
             
-            if sec_key not in accumulated_ndvi_data["analyzed_ndvi_data"]:
-                accumulated_ndvi_data["analyzed_ndvi_data"][sec_key] = {}
+            if time_passed > last_logged_second:
+                
+                # Process collected data samples for the past second
+                counted_samples = count_repeats(data_samples)
+                sec_key = f"second_{second_count}"
+                final_result_dict = {}
+
+                for idx, (data_sample, repeats) in enumerate(counted_samples.items(), start=1):
+                    final_sample_data_result = {"data" : data_sample.to_json()}
                     
-            if (len(accumulated_ndvi_data["analyzed_ndvi_data"][sec_key])) != 2: # temporally, for testing
-                sample_key = f"sample_n_{sample_number}"
-                    
-                accumulated_ndvi_data["analyzed_ndvi_data"][sec_key][sample_key] = rd_handler.get(msg_type.NDVI, False)
-            
-            sample_number += 1
-            
-            if current_second > last_logged_second:
-                last_logged_second = current_second
+                    if repeats > 1:
+                        final_sample_data_result["repeated"] = repeats
+                        
+                        
+                    final_result_dict[f"sample_n_{idx}"] = final_sample_data_result
+
+                accumulated_ndvi_data["analyzed_ndvi_data"][sec_key] = final_result_dict
+                
+                # Prepare for next second
+                data_samples.clear()
                 second_count += 1
-                sample_number = 1
-        
-        # Get after counting
+                last_logged_second = time_passed
+
+        # After analysis snapshot
         accumulated_ndvi_data["analyzed_ndvi_data"]["after_analysis"] = rd_handler.get(msg_type.NDVI, False)
         
-        custom_json = {"robot_data":{**rd_handler.g_timestamp.json,
-                                     **rd_handler.get(msg_type.GPS),
-                                     **rd_handler.t_temperature.json,
-                                     **accumulated_ndvi_data}}
-        
+        custom_json = {
+            "robot_data": {
+                **rd_handler.g_timestamp.json,
+                **rd_handler.get(msg_type.GPS),
+                **rd_handler.t_temperature.json,
+                **accumulated_ndvi_data
+            }
+        }
+
         print(json.dumps(custom_json, indent=4))
-        
-        #return custom_json
+        input()
+
+        #self.publish(JSON_ROBOT_DATA_01, self.robot_message_01())
 
     # The looper function will be the main stream.
     # Where all the json data is being published
-    def data_looper(self) -> None:
+    # def data_looper(self) -> None:
         
-        while True:
+    #     while True:
             
-            self.publish(JSON_ROBOT_DATA_01, self.robot_message_01())
+    #         self.publish(JSON_ROBOT_DATA_01, self.robot_message_01())
 
-            if DEFAULT_PUBLISH:
-                self.publish(JSON_GPS_TOPIC, self.data_bulk[msg_type.GPS.value])
-                self.publish(JSON_TEMPERATURE_TOPIC, self.data_bulk[msg_type.TEMPERATURE.value])
-                self.publish(JSON_NDVI_TOPIC, self.data_bulk[msg_type.NDVI.value])
+    #         if DEFAULT_PUBLISH:
+    #             self.publish(JSON_GPS_TOPIC, self.data_bulk[msg_type.GPS.value])
+    #             self.publish(JSON_TEMPERATURE_TOPIC, self.data_bulk[msg_type.TEMPERATURE.value])
+    #             self.publish(JSON_NDVI_TOPIC, self.data_bulk[msg_type.NDVI.value])
 
 def main(args=None):
     # Main entry point for running the ROS 2 node.

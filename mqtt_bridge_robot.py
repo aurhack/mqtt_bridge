@@ -61,9 +61,6 @@ Upon interception, the messages are processed and transferred to the MQTT broker
 
 # Main class for the ROS 2 node that publishes received ROS2 messages to an MQTT broker.
 class ros2_mqtt_publisher_t(Node):
-
-    # Where all the data is stored locally, in order to update it in the data_looper.
-    data_bulk = defaultdict(lambda: None)
     
     # Initialize the ROS 2 node, instantiate shared data container,
     # subscribe to topics, and connect to MQTT broker.
@@ -79,11 +76,6 @@ class ros2_mqtt_publisher_t(Node):
         try:
             self.mqtt_client.connect(host, port, MQTT_DEFAULT_TIMEOUT)
             self.get_logger().info(f"Connected to MQTT broker at {host}:{port}")
-            
-            # We launch a infinite thread to our data looper so 
-            # we can publish data independently
-            thread = threading.Thread(target=self.data_looper)
-            thread.start()
             
         except Exception as e:
             self.get_logger().error(f"Failed to connect to MQTT broker: {e}")
@@ -104,10 +96,6 @@ class ros2_mqtt_publisher_t(Node):
             payload = json.dumps(data)
             self.mqtt_client.publish(topic, payload)
             self.get_logger().info(f"Published to MQTT: {payload}")
-
-    # Updates the global ROS data container with new parsed values.
-    def data_bulk_update(self, msg_type: msg_type, data: dict) -> None:
-        self.data_bulk[msg_type.value] = data
         
     def warn_malformed_data(self, data_type): 
         return self.get_logger().warn(f"Malformed {data_type} data received")
@@ -126,7 +114,7 @@ class ros2_mqtt_publisher_t(Node):
             "altitude": msg.altitude
         }
         
-        self.data_bulk_update(msg_type.GPS, sanitized_data)
+        self.publish(ROS2MQTT_GPS_TOPIC, sanitized_data)
 
     # Callback for temperature and CWSI data, expected in a formatted string.
     def temperature_callback(self, msg: String):
@@ -143,7 +131,7 @@ class ros2_mqtt_publisher_t(Node):
                     "cwsi": float(found_data_serialized[2])
                 }
                 
-                self.data_bulk_update(msg_type.TEMPERATURE, sanitized_data)
+                self.publish(ROS2MQTT_TEMPERATURE_TOPIC, sanitized_data)
             
             except ValueError as e: self.get_logger().warn(f"Invalid data format: {e}")
         else: self.warn_malformed_data("temperature")
@@ -164,19 +152,10 @@ class ros2_mqtt_publisher_t(Node):
                     "visible": float(found_data[3])
                 }
                 
-                self.data_bulk_update(msg_type.NDVI, sanitized_data)
+                self.publish(ROS2MQTT_NDVI_TOPIC, sanitized_data)
                 
             except ValueError as e: self.get_logger().warn(f"Invalid data format: {e}")
         else: self.warn_malformed_data("NDVI")
-    
-    # The looper function will be the main stream.
-    # Where all the json data is being published
-    def data_looper(self) -> None:
-        
-        while True:
-            self.publish(ROS2MQTT_GPS_TOPIC, self.data_bulk[msg_type.GPS.value])
-            self.publish(ROS2MQTT_TEMPERATURE_TOPIC, self.data_bulk[msg_type.TEMPERATURE.value])
-            self.publish(ROS2MQTT_NDVI_TOPIC, self.data_bulk[msg_type.NDVI.value])
 
 def main(args=None):
     # Main entry point for running the ROS 2 node.
