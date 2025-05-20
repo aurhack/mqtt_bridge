@@ -317,30 +317,24 @@ class mqtt_data_uploader_t(Node):
         accumulated_ndvi_data = {"ndvi": {}}
         
         while True:
-
-            second_count = 1
-            last_logged_second = 0
+            
             data_samples = []
             start_time = time.time()
             finish_line = 1
                 
-            while (time_passed := int(time.time() - start_time)) <= finish_line:
+            while (int(time.time() - start_time)) <= finish_line:
                 
                 new_ndvi_data = rd_handler.get(msg_type.NDVI, False, True)
                 
                 if new_ndvi_data is not None:
                     data_samples.append(new_ndvi_data["ndvi"])
-                
-                if time_passed > last_logged_second:
+            
+            # Get all the data of the second on a organized and unique way
+            # After doing the last step, add it to the dict for the json
+            accumulated_ndvi_data["ndvi"] = [data_sample for data_sample in organized_and_unique(data_samples) if data_sample is not None]
                     
-                    # Get all the data of the second on a organized and unique way
-                    # After doing the last step, add it to the dict for the json
-                    accumulated_ndvi_data["ndvi"] = [data_sample for data_sample in organized_and_unique(data_samples) if data_sample is not None]
-                    
-                    # Prepare for next second
-                    data_samples.clear()
-                    second_count += 1
-                    last_logged_second = time_passed
+            # Prepare for next json
+            data_samples.clear()
 
             def get_last_id():
                 last_doc = collection.find_one(sort=[("_id", -1)])
@@ -360,7 +354,7 @@ class mqtt_data_uploader_t(Node):
                 }
             
             print(json.dumps(custom_json, indent=4))
-            input()
+            collection.insert_one(custom_json)
             #collection.delete_many({})
             # docs = collection.find()
             # for doc in docs:
