@@ -258,7 +258,7 @@ class mqtt_data_uploader_t(Node):
             
             # Subscribe to required MQTT topics
             self.subscribe_to_topics()
-            
+            #soon threads here 
             thread = threading.Thread(target=self.robot_message_01)
             thread.start()
             
@@ -297,8 +297,9 @@ class mqtt_data_uploader_t(Node):
             self.mqtt_client_server.publish(topic, payload)
             self.get_logger().info(f"Published to MQTT Topic -> {topic} the data : {payload}")
     
-    
+    # Robot Message
     def robot_message_01(self) -> str:
+        
         def count_repeats(sequence):
             counts = OrderedDict()
             for item in sequence:
@@ -316,12 +317,13 @@ class mqtt_data_uploader_t(Node):
         data_samples = []
         start_time = time.time()
         finish_line = 5
+        data_per_second = 10
 
         while (time_passed := int(time.time() - start_time)) <= finish_line:
             
             new_ndvi_data = rd_handler.get(msg_type.NDVI, False, True)
             
-            if new_ndvi_data is not None and len(data_samples) < 10:
+            if new_ndvi_data is not None and len(data_samples) < data_per_second:
                 data_samples.append(ndvi_data_hashable_t(new_ndvi_data))
             
             if time_passed > last_logged_second:
@@ -336,7 +338,6 @@ class mqtt_data_uploader_t(Node):
                     
                     if repeats > 1:
                         final_sample_data_result["repeated"] = repeats
-                        
                         
                     final_result_dict[f"sample_n_{idx}"] = final_sample_data_result
 
@@ -359,10 +360,9 @@ class mqtt_data_uploader_t(Node):
             }
         }
 
-        print(json.dumps(custom_json, indent=4))
-        input()
+        #print(json.dumps(custom_json, indent=4))
 
-        #self.publish(JSON_ROBOT_DATA_01, self.robot_message_01())
+        self.publish(JSON_ROBOT_DATA_01, custom_json)
 
     # The looper function will be the main stream.
     # Where all the json data is being published
