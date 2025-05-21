@@ -1,4 +1,4 @@
-from http.client import HTTPResponse
+
 from fastapi import FastAPI
 from contextlib import asynccontextmanager
 from mqtt_bridge_server import mqtt_data_uploader_t
