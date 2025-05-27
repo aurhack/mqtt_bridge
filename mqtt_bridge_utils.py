@@ -6,7 +6,7 @@ class json_wrapper_t:
         self._name = name
         self._value = value
     
-    # To be able to remove 'outer' braces, so we can do :
+    # So we can do :
     # class.member
     # class.member.json
     

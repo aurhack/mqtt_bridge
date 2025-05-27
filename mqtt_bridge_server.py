@@ -123,47 +123,45 @@ class mqtt_data_uploader_t(Node):
         def get_last_id():
             last_doc = self.collection.find_one(sort=[("_id", -1)])
             return last_doc["_id"] + 1 if last_doc else 1
+    
+        def manage_data(sample: dict, data_to_get, samples: list):
+            if sample:
+                
+                sample_to_add = sample.get(data_to_get)
+                
+                if sample_to_add is not None and sample_to_add not in samples:
+                    samples.append(sample_to_add)
+                            
 
         while True:
             
             ndvi_samples = []
-            ndvi_samples_length = 0 # initially 0, we just hardcode, no harm no the flow
-
-            # Collect NDVI data until enough unique samples
-            while ndvi_samples_length < samples_needed:
+            temperature_samples = []
+            start_time = time.time()
+            
+            while (time.time() - start_time) <= sampling_duration_sec:
                 
-                start_time = time.time()
-
-                while (time.time() - start_time) <= sampling_duration_sec:
+                manage_data(rd_handler.get(msg_type.NDVI, False, True), "ndvi", ndvi_samples)
+                manage_data(rd_handler.get(msg_type.TEMPERATURE, False, True), "temperature", temperature_samples)
                     
-                    if ndvi_samples_length == samples_needed: 
-                        break
-                    
-                    new_data = rd_handler.get(msg_type.NDVI, False, True)
-                    
-                    if new_data:
-                        ndvi_float = new_data.get("ndvi")
-                        
-                        if ndvi_float is not None and ndvi_float not in ndvi_samples:
-                            ndvi_samples.append(ndvi_float)
-                            ndvi_samples_length = len(ndvi_samples)
-
             # Build the JSON for MongoDB
             json_data = {
                 "_id": get_last_id(),
                 "robot_data": {
                     **rd_handler.g_timestamp.json,
                     **rd_handler.get(msg_type.GPS),
-                    **rd_handler.t_temperature.json,
-                    "ndvi": ndvi_samples
+                    "temperature_data": temperature_samples,
+                    "ndvi_data": ndvi_samples
                 }
             }
 
-            # Insert into MongoDB
-            #self.collection.insert_one(json_data)
-            #print("Inserted new NDVI batch:", json_data["_id"])
+            # # Insert into MongoDB
+            # self.collection.delete_many({})
+            # self.collection.insert_one(json_data)
+            # print("Inserted new robot data : ", json_data["_id"])
             
             ndvi_samples.clear()
+            temperature_samples.clear()
             
 ### For individual Testing ###
        

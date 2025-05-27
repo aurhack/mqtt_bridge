@@ -57,11 +57,10 @@ async def robot_data_01_csv():
             "latitude": gps["latitude"],
             "longitude": gps["longitude"],
             "altitude": gps["altitude"],
-            "temperature": robot_data["temperature"]
+            "temperature_data": robot_data["temperature_data"],
+            "ndvi_data":robot_data["ndvi_data"]
         }
         
-        for i, sample in enumerate(robot_data["ndvi"]):
-            flat_doc[f"ndvi_data_{i}"] = sample
             
         return flat_doc
 
