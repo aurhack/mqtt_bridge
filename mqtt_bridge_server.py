@@ -113,61 +113,60 @@ class mqtt_data_uploader_t(Node):
             MQTT_TOPIC_TEMPERATURE: msg_type.TEMPERATURE,
             MQTT_TOPIC_NDVI: msg_type.NDVI}.get(topic_name)
         
-    # Publishes the given data to the specified MQTT topic.
-    # def publish(self, topic: str, data: dict) -> None:
-    #     if data is not None:
-    #         payload = json.dumps(data, indent=4)
-    #         self.mqtt_client_server.publish(topic, payload)
-    #         self.get_logger().info(f"Published to MQTT Topic -> {topic} the data : {payload}")
-    
-    # Robot Message
-    def robot_message_01(self) -> str:
+    # Continuous Robot Message Thread Loop
+    def robot_message_01(self):
         
-        def organized_and_unique(sequence): 
-            return list(OrderedDict.fromkeys(sequence))
-
         rd_handler = self.ros_data
-        accumulated_ndvi_data = {"ndvi": {}}
-        
+        samples_needed = 20
+        sampling_duration_sec = 1  # seconds per batch
+
+        def get_last_id():
+            last_doc = self.collection.find_one(sort=[("_id", -1)])
+            return last_doc["_id"] + 1 if last_doc else 1
+
         while True:
             
-            data_samples = []
-            start_time = time.time()
-            finish_line = 1
+            ndvi_samples = []
+            ndvi_samples_length = 0 # initially 0, we just hardcode, no harm no the flow
+
+            # Collect NDVI data until enough unique samples
+            while ndvi_samples_length < samples_needed:
                 
-            while (int(time.time() - start_time)) <= finish_line:
-                
-                new_ndvi_data = rd_handler.get(msg_type.NDVI, False, True)
-                
-                if new_ndvi_data is not None:
-                    data_samples.append(new_ndvi_data["ndvi"])
-            
-            # Get all the data of the second on a organized and unique way
-            # After doing the last step, add it to the dict for the json
-            accumulated_ndvi_data["ndvi"] = [data_sample for data_sample in organized_and_unique(data_samples) if data_sample is not None]
+                start_time = time.time()
+
+                while (time.time() - start_time) <= sampling_duration_sec:
                     
-            # Prepare for next json
-            data_samples.clear()
+                    if ndvi_samples_length == samples_needed: 
+                        break
+                    
+                    new_data = rd_handler.get(msg_type.NDVI, False, True)
+                    
+                    if new_data:
+                        ndvi_float = new_data.get("ndvi")
+                        
+                        if ndvi_float is not None and ndvi_float not in ndvi_samples:
+                            ndvi_samples.append(ndvi_float)
+                            ndvi_samples_length = len(ndvi_samples)
 
-            def get_last_id():
-                last_doc = self.collection.find_one(sort=[("_id", -1)])
-                return last_doc["_id"] + 1 if last_doc else 1
-
-            custom_json = {
-                
+            # Build the JSON for MongoDB
+            json_data = {
                 "_id": get_last_id(),
-                
                 "robot_data": {
                     **rd_handler.g_timestamp.json,
                     **rd_handler.get(msg_type.GPS),
                     **rd_handler.t_temperature.json,
-                    **accumulated_ndvi_data
-                    }
+                    "ndvi": ndvi_samples
                 }
+            }
+
+            # Insert into MongoDB
+            #self.collection.insert_one(json_data)
+            #print("Inserted new NDVI batch:", json_data["_id"])
             
-            #print("inserted a record!\n")
-            #self.collection.insert_one(custom_json)
+            ndvi_samples.clear()
             
+### For individual Testing ###
+       
 def main(args=None):
     # Main entry point for running the ROS 2 node.
     rclpy.init(args=args)
@@ -184,8 +183,8 @@ def main(args=None):
         node.destroy_node()
         rclpy.shutdown()
 
-# Ensure script can be run standalone
-# if __name__ == '__main__':
-#     main()
+## Ensure script can be run standalone
+if __name__ == '__main__':
+    main()
 
 # ---------------------- WHOLE SOURCE ENDS HERE ----------------------

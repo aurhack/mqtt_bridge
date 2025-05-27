@@ -289,73 +289,54 @@ class mqtt_data_uploader_t(Node):
             payload = json.dumps(data, indent=4)
             self.mqtt_client_server.publish(topic, payload)
             self.get_logger().info(f"Published to MQTT Topic -> {topic} the data : {payload}")
-    
-    # Robot Message
-    def robot_message_01(self) -> str:
+            
+    # Continuous Robot Message Thread Loop
+    def robot_message_01(self):
         
-        def count_repeats(sequence):
-            counts = OrderedDict()
-            for item in sequence:
-                counts[item] = counts.get(item, 0) + 1
-            return counts
-
         rd_handler = self.ros_data
-        accumulated_ndvi_data = {"analyzed_ndvi_data": {}}
-        
-        # Before analysis snapshot
-        accumulated_ndvi_data["analyzed_ndvi_data"]["before_analysis"] = rd_handler.get(msg_type.NDVI, False)
-        
-        second_count = 1
-        last_logged_second = 0
-        data_samples = []
-        start_time = time.time()
-        finish_line = 5
-        data_per_second = 10
+        samples_needed = 20
+        sampling_duration_sec = 1  # seconds per batch
 
-        while (time_passed := int(time.time() - start_time)) <= finish_line:
+        while True:
             
-            new_ndvi_data = rd_handler.get(msg_type.NDVI, False, True)
-            
-            if new_ndvi_data is not None and len(data_samples) < data_per_second:
-                data_samples.append(ndvi_data_hashable_t(new_ndvi_data))
-            
-            if time_passed > last_logged_second:
+            ndvi_samples = []
+            ndvi_samples_length = 0 # initially 0, we just hardcode, no harm no the flow
+
+            # Collect NDVI data until enough unique samples
+            while ndvi_samples_length < samples_needed:
                 
-                # Process collected data samples for the past second
-                counted_samples = count_repeats(data_samples)
-                sec_key = f"second_{second_count}"
-                final_result_dict = {}
+                start_time = time.time()
 
-                for idx, (data_sample, repeats) in enumerate(counted_samples.items(), start=1):
-                    final_sample_data_result = {"data" : data_sample.to_json()}
+                while (time.time() - start_time) <= sampling_duration_sec:
                     
-                    if repeats > 1:
-                        final_sample_data_result["repeated"] = repeats
+                    if ndvi_samples_length == samples_needed: 
+                        break
+                    
+                    new_data = rd_handler.get(msg_type.NDVI, False, True)
+                    
+                    if new_data:
+                        ndvi_float = new_data.get("ndvi")
                         
-                    final_result_dict[f"sample_n_{idx}"] = final_sample_data_result
+                        if ndvi_float is not None and ndvi_float not in ndvi_samples:
+                            ndvi_samples.append(ndvi_float)
+                            ndvi_samples_length = len(ndvi_samples)
 
-                accumulated_ndvi_data["analyzed_ndvi_data"][sec_key] = final_result_dict
-                
-                # Prepare for next second
-                data_samples.clear()
-                second_count += 1
-                last_logged_second = time_passed
-
-        # After analysis snapshot
-        accumulated_ndvi_data["analyzed_ndvi_data"]["after_analysis"] = rd_handler.get(msg_type.NDVI, False)
-        
-        custom_json = {
-            "robot_data": {
-                **rd_handler.g_timestamp.json,
-                **rd_handler.get(msg_type.GPS),
-                **rd_handler.t_temperature.json,
-                **accumulated_ndvi_data
+            # Build the JSON for MongoDB
+            json_data = {
+                "robot_data": {
+                    **rd_handler.g_timestamp.json,
+                    **rd_handler.get(msg_type.GPS),
+                    **rd_handler.t_temperature.json,
+                    "ndvi": str(ndvi_samples)
+                }
             }
-        }
 
-        #print(json.dumps(custom_json, indent=4))
+            # Insert into MongoDB
+            #self.collection.insert_one(json_data)
+            #print("Inserted new NDVI batch:", json_data["_id"])
+            self.publish(JSON_ROBOT_DATA_01, json_data)
 
-        self.publish(JSON_ROBOT_DATA_01, custom_json)
+            ndvi_samples.clear()
 
     # The looper function will be the main stream.
     # Where all the json data is being published

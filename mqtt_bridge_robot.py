@@ -11,10 +11,7 @@ from rclpy.qos import QoSProfile
 from sensor_msgs.msg import NavSatFix
 from std_msgs.msg import String, Float32
 
-from dataclasses import dataclass
-from collections import defaultdict
 from enum import Enum
-import threading
 
 # Configuration -- START
 
