@@ -117,7 +117,6 @@ class mqtt_data_uploader_t(Node):
     def robot_message_01(self):
         
         rd_handler = self.ros_data
-        samples_needed = 20
         sampling_duration_sec = 1  # seconds per batch
 
         def get_last_id():

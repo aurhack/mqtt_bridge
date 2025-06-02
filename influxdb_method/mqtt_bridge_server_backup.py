@@ -2,14 +2,17 @@ import json
 import paho.mqtt.client as mqtt
 from  paho.mqtt.client import MQTTMessage
 
+from mqtt_bridge_utils_backup import json_wrapper_t
 import rclpy
 from rclpy.node import Node
 
 from dataclasses import dataclass
-from collections import OrderedDict, defaultdict
 from enum import Enum
 import threading
 import time
+
+from dataclasses import dataclass, field
+from typing import Any, Dict
 
 # Configuration -- START
 
@@ -58,91 +61,7 @@ the specific information to be made available.
 
 # SUMMARY -- END
 
-# This class helps on the access fast deliver members in a json-compatible format  
-class json_wrapper_t:
-    
-    def __init__(self, name, value):
-        self._name = name
-        self._value = value
-    
-    # To be able to remove 'outer' braces, so we can do :
-    # class.member
-    # class.member.json
-    
-    # Without back and forth braces
-    @property
-    def json(self):
-            return dict({self._name : self._value})
-
-    def __getattr__(self, attr): 
-        return getattr(self._value, attr)
-
-    def __str__(self):
-        return str(self._value)
-
-    def __repr__(self):
-        return repr(self._value)
-
-    def __int__(self):
-        return int(self._value)
-
-    def __float__(self):
-        return float(self._value)
-
-    def __eq__(self, other):
-        return self._value == other
-
-    def __add__(self, other):
-        return self._value + other
-
-    @property
-    def value(self):
-        return self._value
-
-# Class made for hashing purposes, to get unique and ordered data inside
-# it's not necessary to create a class for each topic, we could too, but implementation
-# could be harder and maybe even complex, we need to keep the code clean and faster
-
-# IMPORTANT : This is just a helper class, is not meant to work on a native case 
-# it doesn't support a normal constructor based on the normal functionality of the whole source
-# It's made for 'robot_message_01'
-class ndvi_data_hashable_t:
-
-    def __init__(self, json_data:json):
-        self.ndvi = json_data["ndvi"]
-        self.ndvi_3d = json_data["ndvi_3d"]
-        self.ir = json_data["ir"]
-        self.visible = json_data["visible"]
-        
-    def __eq__(self, other):
-        if not isinstance(other, ndvi_data_hashable_t):
-            return False
-        return (self.ndvi == other.ndvi and
-                self.ndvi_3d == other.ndvi_3d and
-                self.ir == other.ir and
-                self.visible == other.visible)
-        
-    def to_json(self):
-        return {"ndvi":self.ndvi,
-                           "ndvi_3d":self.ndvi_3d,
-                           "ir":self.ir,
-                           "visible":self.visible}
-
-    def __hash__(self):
-        return hash((self.ndvi, self.ndvi_3d, self.ir, self.visible))
-    
-    def __iter__(self):
-       yield self.ndvi
-       yield self.ndvi_3d
-       yield self.ir
-       yield self.visible
-
-
 # A helper class to store and update data from ROS messages.
-from dataclasses import dataclass, field
-from typing import Any, Dict
-from collections import OrderedDict
-
 @dataclass
 class ros_data_t:
     # Raw fields (auto-wrapped via __getattribute__)
@@ -288,68 +207,45 @@ class mqtt_data_uploader_t(Node):
         if data is not None:
             payload = json.dumps(data, indent=4)
             self.mqtt_client_server.publish(topic, payload)
-            self.get_logger().info(f"Published to MQTT Topic -> {topic} the data : {payload}")
+            #self.get_logger().info(f"Published to MQTT Topic -> {topic} the data : {payload}")
             
     # Continuous Robot Message Thread Loop
     def robot_message_01(self):
         
         rd_handler = self.ros_data
-        samples_needed = 20
         sampling_duration_sec = 1  # seconds per batch
-
+    
+        def manage_data(sample: dict, data_to_get, samples: list):
+            if sample:
+                
+                sample_to_add = sample.get(data_to_get)
+                
+                if sample_to_add is not None and sample_to_add not in samples:
+                    samples.append(sample_to_add)
+                            
         while True:
             
             ndvi_samples = []
-            ndvi_samples_length = 0 # initially 0, we just hardcode, no harm no the flow
-
-            # Collect NDVI data until enough unique samples
-            while ndvi_samples_length < samples_needed:
-                
-                start_time = time.time()
-
-                while (time.time() - start_time) <= sampling_duration_sec:
-                    
-                    if ndvi_samples_length == samples_needed: 
-                        break
-                    
-                    new_data = rd_handler.get(msg_type.NDVI, False, True)
-                    
-                    if new_data:
-                        ndvi_float = new_data.get("ndvi")
-                        
-                        if ndvi_float is not None and ndvi_float not in ndvi_samples:
-                            ndvi_samples.append(ndvi_float)
-                            ndvi_samples_length = len(ndvi_samples)
-
-            # Build the JSON for MongoDB
-            json_data = {
-                "robot_data": {
-                    **rd_handler.g_timestamp.json,
-                    **rd_handler.get(msg_type.GPS),
-                    **rd_handler.t_temperature.json,
-                    "ndvi": str(ndvi_samples)
-                }
-            }
-
-            # Insert into MongoDB
-            #self.collection.insert_one(json_data)
-            #print("Inserted new NDVI batch:", json_data["_id"])
-            self.publish(JSON_ROBOT_DATA_01, json_data)
-
-            ndvi_samples.clear()
-
-    # The looper function will be the main stream.
-    # Where all the json data is being published
-    # def data_looper(self) -> None:
-        
-    #     while True:
+            temperature_samples = []
+            start_time = time.time()
             
-    #         self.publish(JSON_ROBOT_DATA_01, self.robot_message_01())
-
-    #         if DEFAULT_PUBLISH:
-    #             self.publish(JSON_GPS_TOPIC, self.data_bulk[msg_type.GPS.value])
-    #             self.publish(JSON_TEMPERATURE_TOPIC, self.data_bulk[msg_type.TEMPERATURE.value])
-    #             self.publish(JSON_NDVI_TOPIC, self.data_bulk[msg_type.NDVI.value])
+            while (time.time() - start_time) <= sampling_duration_sec:
+                
+                manage_data(rd_handler.get(msg_type.NDVI, False, True), "ndvi", ndvi_samples)
+                manage_data(rd_handler.get(msg_type.TEMPERATURE, False, True), "temperature", temperature_samples)
+                    
+            # Build the JSON for Mosquitto
+            json_data = {
+                **rd_handler.g_timestamp.json,
+                **rd_handler.get(msg_type.GPS, False),
+                "temperature_data": temperature_samples,
+                "ndvi_data": ndvi_samples
+                }
+            
+            self.publish(JSON_ROBOT_DATA_01, json_data)
+            
+            ndvi_samples.clear()
+            temperature_samples.clear()
 
 def main(args=None):
     # Main entry point for running the ROS 2 node.
