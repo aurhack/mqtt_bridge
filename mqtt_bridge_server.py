@@ -5,8 +5,6 @@ from  paho.mqtt.client import MQTTMessage
 import rclpy
 from rclpy.node import Node
 
-from collections import OrderedDict
-
 import threading
 import time
 import json

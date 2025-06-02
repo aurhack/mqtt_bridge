@@ -1,6 +1,4 @@
 
-from datetime import datetime, timezone
-import io
 from fastapi import FastAPI
 from contextlib import asynccontextmanager
 from mqtt_bridge_server import mqtt_data_uploader_t
