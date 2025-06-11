@@ -1,3 +1,4 @@
+
 import json
 import math
 import paho.mqtt.client as mqtt
@@ -9,11 +10,10 @@ from ros_data import ros_data_t
 import rclpy
 from rclpy.node import Node
 
-from dataclasses import dataclass
 from enum import Enum
 import threading
 import time
-
+from mqtt_bridge_utils import json_wrapper_encoder_t
 # MQTT Specs
 MQTT_DEFAULT_HOST = "localhost"
 MQTT_DEFAULT_PORT = 1883
@@ -124,7 +124,9 @@ class mqtt_data_uploader_t(Node):
     # Plus it sends it to MongoDB Insert..
     def publish(self, topic: str, data: dict) -> None:
         if data is not None:
-            payload = json.dumps(data, indent=4)
+            
+            payload = json.dumps(data, cls=json_wrapper_encoder_t, indent=4)
+            
             self.mqtt_client_server.publish(topic, payload)
             self.collection.insert_one(payload)
             self.get_logger().info(f"Published to MQTT Topic ({topic}) and MongoDB the data : {payload}")
@@ -181,9 +183,9 @@ class mqtt_data_uploader_t(Node):
             # Replace the print with your actual publish function
         
             # Publish to both MongoDB a InfluxDB!!
-            #self.publish(JSON_GLOBAL_TOPIC, json_data)
+            self.publish(JSON_GLOBAL_TOPIC, json_data)
             print(json_data)
-            input()  # Pause, remove or replace in production
+            #input()  # Pause, remove or replace in production
 
             # Clearing lists is unnecessary here because you recreate them each loop
             # But if you want to clear before reuse, just do it once per outer loop iteration

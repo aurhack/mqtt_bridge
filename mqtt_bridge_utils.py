@@ -1,5 +1,8 @@
 
+import json
+
 # This class helps on the access fast deliver members in a json-compatible format  
+    
 class json_wrapper_t:
     
     def __init__(self, name, value):
@@ -11,8 +14,11 @@ class json_wrapper_t:
     # class.member.json
     
     @property
-    def json(self):
-            return dict({self._name : self._value})
+    def json(self) -> dict:
+        return {self._name: self._value}
+
+    def to_dict(self):
+        return self.json
 
     def __getattr__(self, attr): 
         return getattr(self._value, attr)
@@ -38,3 +44,12 @@ class json_wrapper_t:
     @property
     def value(self):
         return self._value
+
+
+class json_wrapper_encoder_t(json.JSONEncoder):
+    def default(self, o):
+        
+        if isinstance(o, json_wrapper_t):
+            return o.to_dict()
+        
+        return super().default(o)
