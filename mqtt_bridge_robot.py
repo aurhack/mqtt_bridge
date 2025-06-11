@@ -11,57 +11,49 @@ from rclpy.qos import QoSProfile
 from sensor_msgs.msg import NavSatFix
 from std_msgs.msg import String, Float32
 
-from enum import Enum
+# MQTT Specs - DO NOT CHANGE
+MQTT_DEFAULT_HOST = "localhost" # This is the robot's "localhost"
+MQTT_DEFAULT_PORT = 1883 # Default MQTT Topic
+MQTT_DEFAULT_TIMEOUT = 120 #Awaiting time whenever it connects to the MQTT Service (2 min)
 
 # Configuration -- START
 
-# ROS2 Topics this node listens to the robot.  ESTOS SE HAN DE ADAPTAR A LOS ROSTOPICS DEL ROBOT!
-remitente_data= "blue_robot"
+# ROS2 Topics this node listens to the robot. 
+
+# ESTOS SE HAN DE ADAPTAR A LOS ROSTOPICS DEL ROBOT!
+
+REMITENT = "blue_robot"
+
 ROS2_TOPIC_GPS = "gps/fix"
 ROS2_TOPIC_TEMPERATURE = "/Temperature_and_CSWI/text"
 ROS2_TOPIC_NDVI = "/NDVI"
-#ROS2_TOPIC_ENVIRONMENT = "ROS_TOPIC (humidity, temperature)
-#ROS2_TOPIC_ENVIRONMENT = "ROS_TOPIC_ORIENTATION
-#ROS2_TOPIC_ENVIRONMENT = "ROS_TOPIC_ROBOTSTATUS
 
-
-
-
-#CONSTANTES DEL HOST NO EDITABLES ---------------------------------
-# MQTT Specs  - NO SE HAN DE CAMBIAR
-MQTT_DEFAULT_HOST = "localhost" #este es el "localhost" del robot
-MQTT_DEFAULT_PORT = 1883 #es el puerto por defecto de Mosquito
-MQTT_DEFAULT_TIMEOUT = 120 #tiempo de espera a que consigue conectar al servicio de mosquito (2 min)
+#ROS2_TOPIC_ENVIRONMENT = ""
+#ROS2_TOPIC_ORIENTATION  = ""
+#ROS2_TOPIC_ROBOT_STATUS = ""
 
 # MQTT output topics where we can get the data easily formatted
-# TESE!! - intentamos unificar en un topic solo para que quede más limpio y editable
-ROS2MQTT_GPS_TOPIC = "mqtt/gps" #a qué topico de mosquito van a parar los datods
-ROS2MQTT_TEMPERATURE_TOPIC = "mqtt/temperature"
-ROS2MQTT_NDVI_TOPIC = "mqtt/ndvi"
 
-
-# Regex - NO TOCAR
-GET_FLOAT_NUMBER = r'\d+\.\d+'
-GET_TEMPERATURE_DATA = rf'([^":]+):|({GET_FLOAT_NUMBER})'
-
-# ROS2 Message Types   -  -   TESÉ LO ELIMINAMOS CON LO DE SOLO UNA SUBSCRIPCION DE MQTT AL ROBOT
-class msg_type(Enum):
-    GPS = 0
-    TEMPERATURE = 1
-    NDVI = 2
+MQTT_GLOBAL_TOPIC = "mqtt/global" 
 
 # Configuration -- END
+
+# Regex - DO NOT TOUCH
+GET_FLOAT_NUMBER = r'\d+\.\d+'
+GET_TEMPERATURE_DATA = rf'([^":]+):|({GET_FLOAT_NUMBER})'
 
 # ---------------------- WHOLE SOURCE STARTS HERE ----------------------
 
 # SUMMARY -- START
 
 """
+
 CLIENTSIDE - THIS SCRIPT MUST BE EXECUTED ON THE ROBOT!!!
 
 This code subscribes to specified ROS2 topics and publishes the received data. 
 It includes predefined callback functions that intercept the incoming messages.
 Upon interception, the messages are processed and transferred to the MQTT broker
+
 """
 
 # SUMMARY -- END
@@ -92,19 +84,27 @@ class ros2_mqtt_publisher_t(Node):
 
     # Sets up ROS topic subscriptions with appropriate message types and callbacks.
     def subscribe_to_topics(self) -> None:
-        qos = QoSProfile(depth=10) #no sabemos que es, pero funciona
+        qos = QoSProfile(depth=10) # Defines Quality of Service
+        
+        # TODO: 
+        # IN THE FUTURE MAKE IT ON A FOR LOOP WITH 100X 
+        # SCALABILITY
         self.create_subscription(NavSatFix, ROS2_TOPIC_GPS, self.gps_callback, qos)
         self.create_subscription(String, ROS2_TOPIC_TEMPERATURE, self.temperature_callback, qos)
         self.create_subscription(String, ROS2_TOPIC_NDVI, self.ndvi_callback, qos)
-        #self.create_subscription(String/FLOAT32/..., ROS_TOPIC_ORIENTATION, self.orientation_callback, qos)
-        #self.create_subscription(String, ROS2_TOPIC_ROBOTSTATUS, self.robotstatus_callback, qos)
+        #self.create_subscription(Float32, ROS2_TOPIC_ORIENTATION, self.orientation_callback, qos)
+        #self.create_subscription(String, ROS2_TOPIC_ROBOT_STATUS, self.robotstatus_callback, qos)
     
    
     # Publishes the given data to the specified MQTT topic.
     def publish(self, topic: str, data: dict) -> None:
+        
         if data is not None:
+            
             payload = json.dumps(data)
+            
             self.mqtt_client.publish(topic, payload)
+            
             self.get_logger().info(f"Published to MQTT: {payload}")
         
     def warn_malformed_data(self, data_type): 
@@ -115,6 +115,8 @@ class ros2_mqtt_publisher_t(Node):
         
         # Make a dictionary with the data we want
         sanitized_data = {
+            "msg_type": "gps",
+            
             # We get the timestamp specifically from GPS for real time position precision
             "timestamp": msg.header.stamp.sec,
             # ~!!!
@@ -124,7 +126,7 @@ class ros2_mqtt_publisher_t(Node):
             "altitude": msg.altitude
         }
         
-        self.publish(ROS2MQTT_GPS_TOPIC, sanitized_data)
+        self.publish(MQTT_GLOBAL_TOPIC, sanitized_data)
 
     # Callback for temperature and CWSI data, expected in a formatted string.
     def temperature_callback(self, msg: String):
@@ -136,13 +138,15 @@ class ros2_mqtt_publisher_t(Node):
         if len(found_data_serialized) >= 2:
             try:
                 sanitized_data = {
+                    "msg_type": "temperature",
+                    
                     "entity_count": found_data_serialized[0],
                     "canopy_temperature": float(found_data_serialized[1]),
                     "cwsi": float(found_data_serialized[2])
                 }
                 
-                self.publish(ROS2MQTT_TEMPERATURE_TOPIC, sanitized_data)
-            
+                self.publish(MQTT_GLOBAL_TOPIC, sanitized_data)
+                
             except ValueError as e: self.get_logger().warn(f"Invalid data format: {e}")
         else: self.warn_malformed_data("temperature")
 
@@ -156,40 +160,26 @@ class ros2_mqtt_publisher_t(Node):
         if len(found_data) <= 4:
             try:
                 sanitized_data = {
+                    "msg_type": "ndvi",
+                    
                     "ndvi": float(found_data[0]),
                     "ndvi_3d": float(found_data[1]),
                     "ir": float(found_data[2]),
                     "visible": float(found_data[3])
                 }
                 
-                self.publish(ROS2MQTT_NDVI_TOPIC, sanitized_data)
+                self.publish(MQTT_GLOBAL_TOPIC, sanitized_data)
                 
             except ValueError as e: self.get_logger().warn(f"Invalid data format: {e}")
         else: self.warn_malformed_data("NDVI")
+        
 """
     def orientation_callback(self, msg: Float32):
-        
-        # We get the float values with regex
-        found_data = re.findall(GET_FLOAT_NUMBER, msg.data)
-        
-        # Check if it's healthy
-        if len(found_data) <= 4:
-            try:
-                sanitized_data = {
-                    "ndvi": float(found_data[0]),
-                    "ndvi_3d": float(found_data[1]),
-                    "ir": float(found_data[2]),
-                    "visible": float(found_data[3])
-                }
-                
-                self.publish(ROS2MQTT_TOPIC, sanitized_data)
-                
-            except ValueError as e: self.get_logger().warn(f"Invalid data format: {e}")
-        else: self.warn_malformed_data("NDVI")
+        pass
 """
 
-
 def main(args=None):
+    
     # Main entry point for running the ROS 2 node.
     rclpy.init(args=args)
 

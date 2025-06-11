@@ -137,50 +137,50 @@ def get_influx_data():
 async def robot_data_01_json() -> Dict[str, Any]:
     return get_influx_data()
     
-@app.get("/robot_data_01/csv")
-async def robot_data_01_csv():
+# @app.get("/robot_data_01/csv")
+# async def robot_data_01_csv():
     
-    data = get_influx_data()
+#     data = get_influx_data()
     
-    if not data:
-        return Response(content="No data available", media_type="text/plain", status_code=204)
+#     if not data:
+#         return Response(content="No data available", media_type="text/plain", status_code=204)
     
-    headers = ['timestamp',
-               'latitude',
-               'longitude', 
-               'altitude',
-               'canopy_temperature_data',
-               'ndvi_data',
-               'ndvi_3d_data',
-               'environment_temperature',
-               'environment_humidity',
-               'sensor_orientation',
-               "robot_status"]
+#     headers = ['timestamp',
+#                'latitude',
+#                'longitude', 
+#                'altitude',
+#                'canopy_temperature_data',
+#                'ndvi_data',
+#                'ndvi_3d_data',
+#                'environment_temperature',
+#                'environment_humidity',
+#                'sensor_orientation',
+#                "robot_status"]
     
-    output = io.StringIO()
-    writer = csv.DictWriter(output, fieldnames=headers)
-    writer.writeheader()
+#     output = io.StringIO()
+#     writer = csv.DictWriter(output, fieldnames=headers)
+#     writer.writeheader()
     
-    for entry in data:
+#     for entry in data:
         
-        # Serialize the list fields as JSON strings so they fit nicely in CSV cells
+#         # Serialize the list fields as JSON strings so they fit nicely in CSV cells
         
-        row = {
-            'timestamp': entry['timestamp'],
-            'latitude': entry['latitude'],
-            'longitude': entry['longitude'],
-            'altitude': entry['altitude'],
-            'canopy_temperature_data': json.dumps(entry['canopy_temperature_data']),
-            'ndvi_data': json.dumps(entry['ndvi_data']),
-            'ndvi_3d_data': json.dumps(entry['ndvi_3d_data']),
+#         row = {
+#             'timestamp': entry['timestamp'],
+#             'latitude': entry['latitude'],
+#             'longitude': entry['longitude'],
+#             'altitude': entry['altitude'],
+#             'canopy_temperature_data': json.dumps(entry['canopy_temperature_data']),
+#             'ndvi_data': json.dumps(entry['ndvi_data']),
+#             'ndvi_3d_data': json.dumps(entry['ndvi_3d_data']),
             
-            # non-categorized
-            "environment_temperature": 0,
-            "environment_humidity":0,
-            "sensor_orientation": 0,
-            "robot_status":0
-        }
+#             # non-categorized
+#             "environment_temperature": 0,
+#             "environment_humidity":0,
+#             "sensor_orientation": 0,
+#             "robot_status":0
+#         }
         
-        writer.writerow(row)
+#         writer.writerow(row)
 
-    return Response(content=output.getvalue(), media_type="text/csv")
+#     return Response(content=output.getvalue(), media_type="text/csv")

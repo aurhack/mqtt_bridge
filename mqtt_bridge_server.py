@@ -1,6 +1,7 @@
 import json
 import paho.mqtt.client as mqtt
 from  paho.mqtt.client import MQTTMessage
+from pymongo import MongoClient
 
 from mqtt_bridge_utils import json_wrapper_t
 import rclpy
@@ -14,24 +15,21 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Dict
 
-# Configuration -- START
-
 # MQTT Specs
 MQTT_DEFAULT_HOST = "localhost"
 MQTT_DEFAULT_PORT = 1883
 MQTT_DEFAULT_TIMEOUT = 120
 
-# MQTT topics where the data is being sent to
-JSON_GPS_TOPIC = "gps/json"
-JSON_TEMPERATURE_TOPIC = "temperature/json"
-JSON_NDVI_TOPIC = "ndvi/json"
+# Configuration -- START
 
-JSON_ROBOT_DATA_01 = "robot/json"
+# MQTT topics where the data is being sent to
+JSON_GLOBAL_TOPIC = "global/json"
 
 # MQTT Topics this node listens to
-MQTT_TOPIC_GPS = "mqtt/gps"
-MQTT_TOPIC_TEMPERATURE = "mqtt/temperature"
-MQTT_TOPIC_NDVI = "mqtt/ndvi"
+
+MQTT_GLOBAL_TOPIC = "mqtt/global"
+
+# Configuration -- END
 
 # ros_data_t msg types
 class msg_type(Enum):
@@ -39,13 +37,12 @@ class msg_type(Enum):
     TEMPERATURE = 1
     NDVI = 2
 
-# Configuration -- END
-
 # ---------------------- WHOLE SOURCE STARTS HERE ----------------------
 
 # SUMMARY -- START
 
 """
+
 SERVERSIDE - THIS SCRIPT MUST BE EXECUTED ON THE SERVER!!!
 
 This code subscribes to specified MQTT topics and publishes the received data. 
@@ -57,6 +54,7 @@ global data class, making the data available in real-time.
 This approach allows the generation of custom JSON data containing values 
 from the subscribed topics, providing flexibility in selecting
 the specific information to be made available.
+
 """
 
 # SUMMARY -- END
@@ -64,7 +62,9 @@ the specific information to be made available.
 # A helper class to store and update data from ROS messages.
 @dataclass
 class ros_data_t:
+    
     # Raw fields (auto-wrapped via __getattribute__)
+    
     g_timestamp: int = None 
     g_latitude: float = None
     g_longitude: float = None
@@ -137,6 +137,7 @@ class ros_data_t:
         self._changed_flags[key] = False
 
         merged_data = {}
+        
         for part in json_parts:
             merged_data.update(part)
 
@@ -159,6 +160,15 @@ class mqtt_data_uploader_t(Node):
         self.mqtt_client_server = mqtt.Client()
         
         try:
+            
+            # Hard coded for now, don't blame 
+            self.client = MongoClient("mongodb://admin:cdei2025@192.168.13.106:27017/", server_api=ServerApi('1'))
+            self.db = self.client["ROS2"]
+            self.collection = self.db["General"]
+            
+            # Connect to Mongo DB Client
+            self.get_logger().info(f"Connected to MongoDB..")
+            
             # We use our client to publish the data and we use the robot client to collect it.
             self.mqtt_client_server.connect(MQTT_DEFAULT_HOST, MQTT_DEFAULT_PORT, MQTT_DEFAULT_TIMEOUT)
             self.get_logger().info(f"Connected to our MQTT client")
@@ -181,10 +191,7 @@ class mqtt_data_uploader_t(Node):
 
     # Sets up ROS topic subscriptions with appropriate message types and callbacks.
     def subscribe_to_topics(self) -> None:
-        qos = 0
-        self.mqtt_client_robot.subscribe(MQTT_TOPIC_GPS, qos)
-        self.mqtt_client_robot.subscribe(MQTT_TOPIC_TEMPERATURE, qos)  
-        self.mqtt_client_robot.subscribe(MQTT_TOPIC_NDVI, qos)                       
+        self.mqtt_client_robot.subscribe(MQTT_GLOBAL_TOPIC, qos=0)                       
         
         # Let the robot client get the callback so we can get the values from the topics
         # we got subscribed to
@@ -192,20 +199,16 @@ class mqtt_data_uploader_t(Node):
     
     # This is the main callback to get all the data from the subscribed topics
     def on_mqtt_message(self, client, userdata, msg: MQTTMessage):
-        self.ros_data.update({"msg_type": self.get_msg_type_by_topic(msg.topic), **json.loads(msg.payload.decode("utf-8"))})
-    
-    def get_msg_type_by_topic(self, topic_name) -> msg_type:
-        return {
-            MQTT_TOPIC_GPS: msg_type.GPS,
-            MQTT_TOPIC_TEMPERATURE: msg_type.TEMPERATURE,
-            MQTT_TOPIC_NDVI: msg_type.NDVI}.get(topic_name)
+        self.ros_data.update(json.loads(msg.payload.decode("utf-8")))
         
     # Publishes the given data to the specified MQTT topic.
+    # Plus it sends it to MongoDB Insert..
     def publish(self, topic: str, data: dict) -> None:
         if data is not None:
             payload = json.dumps(data, indent=4)
             self.mqtt_client_server.publish(topic, payload)
-            #self.get_logger().info(f"Published to MQTT Topic -> {topic} the data : {payload}")
+            self.collection.insert_one(payload)
+            self.get_logger().info(f"Published to MQTT Topic ({topic}) and MongoDB the data : {payload}")
             
     # Continuous Robot Message Thread Loop
     def robot_message_01(self):
@@ -246,14 +249,15 @@ class mqtt_data_uploader_t(Node):
                 "ndvi_data": ndvi_samples,
                 "ndvi_3d_data": ndvi_3d_samples,
                 
-                #non-categorized
+                #non-categorized (temporal)
                 "environment_temperature": 0,
                 "environment_humidity": 0,
                 "sensor_orientation": 0,
                 "robot_status": 0
                 }
             
-            self.publish(JSON_ROBOT_DATA_01, json_data)
+            # Publish to both MongoDB a InfluxDB!!
+            self.publish(JSON_GLOBAL_TOPIC, json_data)
             
             ndvi_samples.clear()
             canopy_temperature_samples.clear()
