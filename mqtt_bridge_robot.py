@@ -15,6 +15,19 @@ from enum import Enum
 
 # Configuration -- START
 
+# ROS2 Topics this node listens to the robot.  ESTOS SE HAN DE ADAPTAR A LOS ROSTOPICS DEL ROBOT!
+remitente_data= "blue_robot"
+ROS2_TOPIC_GPS = "gps/fix"
+ROS2_TOPIC_TEMPERATURE = "/Temperature_and_CSWI/text"
+ROS2_TOPIC_NDVI = "/NDVI"
+#ROS2_TOPIC_ENVIRONMENT = "ROS_TOPIC (humidity, temperature)
+#ROS2_TOPIC_ENVIRONMENT = "ROS_TOPIC_ORIENTATION
+#ROS2_TOPIC_ENVIRONMENT = "ROS_TOPIC_ROBOTSTATUS
+
+
+
+
+#CONSTANTES DEL HOST NO EDITABLES ---------------------------------
 # MQTT Specs  - NO SE HAN DE CAMBIAR
 MQTT_DEFAULT_HOST = "localhost" #este es el "localhost" del robot
 MQTT_DEFAULT_PORT = 1883 #es el puerto por defecto de Mosquito
@@ -27,15 +40,7 @@ ROS2MQTT_TEMPERATURE_TOPIC = "mqtt/temperature"
 ROS2MQTT_NDVI_TOPIC = "mqtt/ndvi"
 
 
-# ROS2 Topics this node listens to the robot.  ESTOS SE HAN DE ADAPTAR A LOS ROSTOPICS DEL ROBOT!
-ROS2_TOPIC_GPS = "gps/fix"
-ROS2_TOPIC_TEMPERATURE = "/Temperature_and_CSWI/text"
-ROS2_TOPIC_NDVI = "/NDVI"
-#ROS2_TOPIC_ENVIRONMENT = "ROS_TOPIC (humidity, temperature)
-#ROS2_TOPIC_ENVIRONMENT = "ROS_TOPIC_ORIENTATION
-#ROS2_TOPIC_ENVIRONMENT = "ROS_TOPIC_ROBOTSTATUS
-
-# Regex
+# Regex - NO TOCAR
 GET_FLOAT_NUMBER = r'\d+\.\d+'
 GET_TEMPERATURE_DATA = rf'([^":]+):|({GET_FLOAT_NUMBER})'
 
