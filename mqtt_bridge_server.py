@@ -2,6 +2,7 @@ import json
 import paho.mqtt.client as mqtt
 from  paho.mqtt.client import MQTTMessage
 from pymongo import MongoClient
+from pymongo.server_api import ServerApi
 
 from mqtt_bridge_utils import json_wrapper_t
 import rclpy
