@@ -6,7 +6,7 @@ import re
 from contextlib import asynccontextmanager
 
 from pydantic import BaseModel
-from mqtt_bridge_server_backup import mqtt_data_uploader_t
+from mqtt_bridge_server import mqtt_data_uploader_t
 
 import rclpy
 import threading
@@ -44,7 +44,7 @@ async def lifespan(app: FastAPI):
     rclpy.init()
     
     node = mqtt_data_uploader_t("192.168.13.26")
-    client =  InfluxDBClient(url=url, token=token, org=org)
+    client = InfluxDBClient(url=url, token=token, org=org)
     query_api = client.query_api()
     # Optionally spin ROS node in background if needed
     spin_thread = threading.Thread(target=rclpy.spin, args=(node,), daemon=True)
@@ -62,8 +62,9 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 # Precompile regex patterns once
+_canopy_temp_pattern = re.compile(r"^canopy_temperature_data_(\d+)$")
 _ndvi_pattern = re.compile(r"^ndvi_data_(\d+)$")
-_temp_pattern = re.compile(r"^temperature_data_(\d+)$")
+_ndvi_3d_pattern = re.compile(r"^ndvi_3d_data_(\d+)$")
 
 def extract_sorted_values_by_prefix(data: Dict[str, Any], pattern: re.Pattern) -> List[Any]:
     
@@ -75,16 +76,25 @@ def extract_sorted_values_by_prefix(data: Dict[str, Any], pattern: re.Pattern) -
     matched_items.sort(key=lambda x: x[0])
     return [value for _, _, value in matched_items]
 
-class DataEntry(BaseModel):
+class robot_data_01_model(BaseModel):
     timestamp: float
     latitude: float
     longitude: float
     altitude: float
+    canopy_temperature_data: List[float]
     ndvi_data: List[float]
-    temperature_data: List[float]
+    ndvi_3d_data: List[float]
+    
+    #non-categorized
+    
+    environment_temperature: float
+    environment_humidity: float
+    sensor_orientation: float
+    robot_status: float
 
 # Ultra sanitized data because Influx sucks
 def get_influx_data():
+    
     flux_query = f'''
     from(bucket: "{bucket}")
     |> range(start: -1h)
@@ -108,43 +118,69 @@ def get_influx_data():
                 "latitude": row.get("latitude"),
                 "longitude": row.get("longitude"),
                 "altitude": row.get("altitude"),
+                "canopy_temperature_data": extract_sorted_values_by_prefix(row, _canopy_temp_pattern),
                 "ndvi_data": extract_sorted_values_by_prefix(row, _ndvi_pattern),
-                "temperature_data": extract_sorted_values_by_prefix(row, _temp_pattern)
+                "ndvi_3d_data":extract_sorted_values_by_prefix(row, _ndvi_3d_pattern),
+                
+                #non-categorized
+                "environment_temperature":0,
+                "environment_humidity": 0,
+                "sensor_orientation":0,
+                "robot_status": 0
             }
             
             data.append(entry)
     
     return data
 
-@app.get("/robot_data_01/json", response_model=List[DataEntry])
+@app.get("/robot_data_01/json", response_model=List[robot_data_01_model])
 async def robot_data_01_json() -> Dict[str, Any]:
     return get_influx_data()
     
 @app.get("/robot_data_01/csv")
 async def robot_data_01_csv():
+    
     data = get_influx_data()
     
     if not data:
         return Response(content="No data available", media_type="text/plain", status_code=204)
     
-    headers = ['timestamp', 'latitude', 'longitude', 'altitude', 'ndvi_data', 'temperature_data']
+    headers = ['timestamp',
+               'latitude',
+               'longitude', 
+               'altitude',
+               'canopy_temperature_data',
+               'ndvi_data',
+               'ndvi_3d_data',
+               'environment_temperature',
+               'environment_humidity',
+               'sensor_orientation',
+               "robot_status"]
     
     output = io.StringIO()
-    
     writer = csv.DictWriter(output, fieldnames=headers)
-    
     writer.writeheader()
     
     for entry in data:
+        
         # Serialize the list fields as JSON strings so they fit nicely in CSV cells
+        
         row = {
             'timestamp': entry['timestamp'],
             'latitude': entry['latitude'],
             'longitude': entry['longitude'],
             'altitude': entry['altitude'],
+            'canopy_temperature_data': json.dumps(entry['canopy_temperature_data']),
             'ndvi_data': json.dumps(entry['ndvi_data']),
-            'temperature_data': json.dumps(entry['temperature_data'])
+            'ndvi_3d_data': json.dumps(entry['ndvi_3d_data']),
+            
+            # non-categorized
+            "environment_temperature": 0,
+            "environment_humidity":0,
+            "sensor_orientation": 0,
+            "robot_status":0
         }
+        
         writer.writerow(row)
 
     return Response(content=output.getvalue(), media_type="text/csv")

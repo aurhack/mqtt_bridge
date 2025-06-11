@@ -2,7 +2,7 @@ import json
 import paho.mqtt.client as mqtt
 from  paho.mqtt.client import MQTTMessage
 
-from mqtt_bridge_utils_backup import json_wrapper_t
+from mqtt_bridge_utils import json_wrapper_t
 import rclpy
 from rclpy.node import Node
 
@@ -71,7 +71,7 @@ class ros_data_t:
     g_altitude: float = None
 
     t_entity_count: str = None
-    t_temperature: float = None
+    t_canopy_temperature: float = None
     t_cswi: float = None
 
     n_ndvi: float = None
@@ -97,7 +97,7 @@ class ros_data_t:
 
         elif msg == msg_type.TEMPERATURE:
             self.t_entity_count = data["entity_count"]
-            self.t_temperature = data["temperature"]
+            self.t_canopy_temperature = data["canopy_temperature"]
             self.t_cswi = data["cwsi"]
             self._changed_flags["temperature"] = True
 
@@ -120,7 +120,7 @@ class ros_data_t:
     def get(self, type, with_key=True, only_if_changed=False):
         config = {
             msg_type.GPS: ("gps", [self.g_latitude.json, self.g_longitude.json, self.g_altitude.json]),
-            msg_type.TEMPERATURE: ("temperature", [self.t_entity_count.json, self.t_temperature.json, self.t_cswi.json]),
+            msg_type.TEMPERATURE: ("temperature", [self.t_entity_count.json, self.t_canopy_temperature.json, self.t_cswi.json]),
             msg_type.NDVI: ("ndvi", [self.n_ndvi.json, self.n_ndvi_3d.json, self.n_ir.json, self.n_visible.json])
         }
 
@@ -141,8 +141,6 @@ class ros_data_t:
             merged_data.update(part)
 
         return {key: merged_data} if with_key else merged_data
-
-
 
 # Main class for the ROS 2 node that publishes received MQTT messages to an MQTT broker.
 # After that, we just listen with Telegraf and InfluxDB processes everything
@@ -225,27 +223,41 @@ class mqtt_data_uploader_t(Node):
                             
         while True:
             
+            canopy_temperature_samples = []
             ndvi_samples = []
-            temperature_samples = []
+            ndvi_3d_samples = []
+            
+            with_key = False
+            only_if_changed = True
+            
             start_time = time.time()
             
             while (time.time() - start_time) <= sampling_duration_sec:
                 
-                manage_data(rd_handler.get(msg_type.NDVI, False, True), "ndvi", ndvi_samples)
-                manage_data(rd_handler.get(msg_type.TEMPERATURE, False, True), "temperature", temperature_samples)
+                manage_data(rd_handler.get(msg_type.TEMPERATURE, with_key, only_if_changed), "canopy_temperature", canopy_temperature_samples)
+                manage_data(rd_handler.get(msg_type.NDVI, with_key, only_if_changed), "ndvi", ndvi_samples)
+                manage_data(rd_handler.get(msg_type.NDVI, with_key, only_if_changed), "ndvi_3d", ndvi_3d_samples)
                     
             # Build the JSON for Mosquitto
             json_data = {
                 **rd_handler.g_timestamp.json,
-                **rd_handler.get(msg_type.GPS, False),
-                "temperature_data": temperature_samples,
-                "ndvi_data": ndvi_samples
+                **rd_handler.get(msg_type.GPS, with_key),
+                "canopy_temperature_data": canopy_temperature_samples,
+                "ndvi_data": ndvi_samples,
+                "ndvi_3d_data": ndvi_3d_samples,
+                
+                #non-categorized
+                "environment_temperature": 0,
+                "environment_humidity": 0,
+                "sensor_orientation": 0,
+                "robot_status": 0
                 }
             
             self.publish(JSON_ROBOT_DATA_01, json_data)
             
             ndvi_samples.clear()
-            temperature_samples.clear()
+            canopy_temperature_samples.clear()
+            ndvi_3d_samples.clear()
 
 def main(args=None):
     # Main entry point for running the ROS 2 node.

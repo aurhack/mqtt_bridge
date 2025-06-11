@@ -1,3 +1,4 @@
+from datetime import datetime
 
 import paho.mqtt.client as mqtt
 from  paho.mqtt.client import MQTTMessage
@@ -71,7 +72,7 @@ class mqtt_data_uploader_t(Node):
         try:
             
             # Hard coded for now, don't blame 
-            self.client = MongoClient("mongodb://localhost:27017/", server_api=ServerApi('1'))
+            self.client = MongoClient("mongodb://admin:cdei2025@192.168.13.106:27017/", server_api=ServerApi('1'))
             self.db = self.client["ROS2"]
             self.collection = self.db["General"]
 
@@ -133,32 +134,41 @@ class mqtt_data_uploader_t(Node):
         while True:
             
             ndvi_samples = []
-            temperature_samples = []
+            ndvi_3d_samples = []
+            canopy_temperature_samples = []
             start_time = time.time()
             
             while (time.time() - start_time) <= sampling_duration_sec:
                 
                 manage_data(rd_handler.get(msg_type.NDVI, False, True), "ndvi", ndvi_samples)
-                manage_data(rd_handler.get(msg_type.TEMPERATURE, False, True), "temperature", temperature_samples)
+                manage_data(rd_handler.get(msg_type.NDVI, False, True), "ndvi_3d", ndvi_3d_samples)
+                manage_data(rd_handler.get(msg_type.TEMPERATURE, False, True), "canopy_temperature", canopy_temperature_samples)
                     
             # Build the JSON for MongoDB
             json_data = {
                 "_id": get_last_id(),
                 "robot_data": {
-                    **rd_handler.g_timestamp.json,
+                    "timestamp":datetime.fromtimestamp(float(rd_handler.g_timestamp)),
                     **rd_handler.get(msg_type.GPS),
-                    "temperature_data": temperature_samples,
-                    "ndvi_data": ndvi_samples
-                }
+                    "canopy_temperature": canopy_temperature_samples,
+                    "ndvi_data": ndvi_samples,
+                    "ndvi_3d_data": ndvi_3d_samples
+                },
+                
+                 #non-categorized
+                "environment_temperature": 0,
+                "environment_humidity": 0,
+                "sensor_orientation": 0,
+                "robot_status": 0
             }
 
             # # Insert into MongoDB
-            # self.collection.delete_many({})
-            # self.collection.insert_one(json_data)
-            # print("Inserted new robot data : ", json_data["_id"])
+            #self.collection.delete_many({})
+            self.collection.insert_one(json_data)
+            print("Inserted new robot data : ", json_data["_id"])
             
             ndvi_samples.clear()
-            temperature_samples.clear()
+            canopy_temperature_samples.clear()
             
 ### For individual Testing ###
        

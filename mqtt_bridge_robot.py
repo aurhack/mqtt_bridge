@@ -124,7 +124,7 @@ class ros2_mqtt_publisher_t(Node):
             try:
                 sanitized_data = {
                     "entity_count": found_data_serialized[0],
-                    "temperature": float(found_data_serialized[1]),
+                    "canopy_temperature": float(found_data_serialized[1]),
                     "cwsi": float(found_data_serialized[2])
                 }
                 

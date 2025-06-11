@@ -58,8 +58,7 @@ async def robot_data_01_csv():
             "temperature_data": robot_data["temperature_data"],
             "ndvi_data":robot_data["ndvi_data"]
         }
-        
-            
+
         return flat_doc
 
     # Get documents (await!)

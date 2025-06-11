@@ -22,7 +22,7 @@ class ros_data_t:
     g_altitude: float = None
 
     t_entity_count: str = None
-    t_temperature: float = None
+    t_canopy_temperature: float = None
     t_cswi: float = None
 
     n_ndvi: float = None
@@ -48,7 +48,7 @@ class ros_data_t:
 
         elif msg == msg_type.TEMPERATURE:
             self.t_entity_count = data["entity_count"]
-            self.t_temperature = data["temperature"]
+            self.t_canopy_temperature = data["canopy_temperature"]
             self.t_cswi = data["cwsi"]
             self._changed_flags["temperature"] = True
 
@@ -63,15 +63,19 @@ class ros_data_t:
             raise ValueError(f"Unsupported msg_type: {msg}")
 
     def __getattribute__(self, name: str) -> Any:
+        
         value = super().__getattribute__(name)
+        
         if name.startswith('_') or callable(value):
             return value
+        
         return json_wrapper_t(name[2:], value)
 
     def get(self, type, with_key=True, only_if_changed=False):
+        
         config = {
             msg_type.GPS: ("gps", [self.g_latitude.json, self.g_longitude.json, self.g_altitude.json]),
-            msg_type.TEMPERATURE: ("temperature", [self.t_entity_count.json, self.t_temperature.json, self.t_cswi.json]),
+            msg_type.TEMPERATURE: ("temperature", [self.t_entity_count.json, self.t_canopy_temperature.json, self.t_cswi.json]),
             msg_type.NDVI: ("ndvi", [self.n_ndvi.json, self.n_ndvi_3d.json, self.n_ir.json, self.n_visible.json])
         }
 
@@ -92,5 +96,3 @@ class ros_data_t:
             merged_data.update(part)
 
         return {key: merged_data} if with_key else merged_data
-
-

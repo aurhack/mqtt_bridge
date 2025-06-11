@@ -10,7 +10,6 @@ class json_wrapper_t:
     # class.member
     # class.member.json
     
-    # Without back and forth braces
     @property
     def json(self):
             return dict({self._name : self._value})
