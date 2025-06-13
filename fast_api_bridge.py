@@ -118,6 +118,8 @@ def get_influx_data():
                 "latitude": row.get("latitude"),
                 "longitude": row.get("longitude"),
                 "altitude": row.get("altitude"),
+                "status": row.get("status"),
+                "service": row.get("service"),
                 "canopy_temperature_data": extract_sorted_values_by_prefix(row, _canopy_temp_pattern),
                 "ndvi_data": extract_sorted_values_by_prefix(row, _ndvi_pattern),
                 "ndvi_3d_data":extract_sorted_values_by_prefix(row, _ndvi_3d_pattern),

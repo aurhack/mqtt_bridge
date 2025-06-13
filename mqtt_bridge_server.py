@@ -6,6 +6,7 @@ from  paho.mqtt.client import MQTTMessage
 from pymongo import MongoClient
 from pymongo.server_api import ServerApi
 
+from mqtt_bridge_utils import json_default
 from ros_data import ros_data_t
 import rclpy
 from rclpy.node import Node
@@ -54,6 +55,8 @@ the specific information to be made available.
 # A helper class to store and update data from ROS messages.
 # Main class for the ROS 2 node that publishes received MQTT messages to an MQTT broker.
 # After that, we just listen with Telegraf and InfluxDB processes everything
+
+# Update, we merged databases!, we will be storing parallel data on MongoDB too
 class mqtt_data_uploader_t(Node):
     
     # Initialize the ROS 2 node, instantiate shared data container,
@@ -96,7 +99,7 @@ class mqtt_data_uploader_t(Node):
     # Sets up ROS topic subscriptions with appropriate message types and callbacks.
     def subscribe_to_topics(self) -> None:
         self.mqtt_client_server.subscribe(MQTT_GLOBAL_TOPIC, qos=0)                       
-        self.get_logger().info(f"Subscribed to the topics")
+        self.get_logger().info(f"Subscribed to the global topic")
         
         # Let the robot client get the callback so we can get the values from the topics
         # we got subscribed to
@@ -104,7 +107,6 @@ class mqtt_data_uploader_t(Node):
     
     # This is the main callback to get all the data from the subscribed topics
     def on_mqtt_message(self, client, userdata, msg: MQTTMessage):
-    
         self.ros_data.update(json.loads(msg.payload.decode("utf-8")))
         
     # Publishes the given data to the specified MQTT topic.
@@ -144,6 +146,7 @@ class mqtt_data_uploader_t(Node):
             start_time = time.time()
 
             while (time.time() - start_time) <= sampling_duration_sec:
+                
                 manage_data(rd_handler.t_canopy_temperature, canopy_temperature_samples)
                 manage_data(rd_handler.n_ndvi, ndvi_samples)
                 manage_data(rd_handler.n_ndvi_3d, ndvi_3d_samples)
@@ -155,6 +158,8 @@ class mqtt_data_uploader_t(Node):
                 **rd_handler.g_latitude.json,
                 **rd_handler.g_longitude.json,
                 **rd_handler.g_altitude.json,
+                **rd_handler.g_status.json,
+                **rd_handler.g_service.json,
 
                 "canopy_temperature_data": canopy_temperature_samples,
                 "ndvi_data": ndvi_samples,
@@ -170,7 +175,7 @@ class mqtt_data_uploader_t(Node):
             
             # Publish to both MongoDB a InfluxDB!!
             #self.publish(JSON_GLOBAL_TOPIC, json_data)
-            print(json_data)
+            print(json.dumps(json_data, indent=4))
             #input()  # Pause, remove or replace in production
 
             # Clearing lists is unnecessary here because you recreate them each loop
@@ -187,7 +192,7 @@ def main(args=None):
     except KeyboardInterrupt:
         pass
     finally:
-        node.mqtt_client_robot.disconnect()
+    
         node.mqtt_client_server.disconnect()
         node.get_logger().info("Disconnected from MQTT broker.")
         node.destroy_node()
