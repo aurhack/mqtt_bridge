@@ -66,21 +66,22 @@ class ros2_mqtt_publisher_t(Node):
     def __init__(self, host=MQTT_DEFAULT_HOST, port=MQTT_DEFAULT_PORT):
         super().__init__('ros2_mqtt_publisher')
 
-        # Subscribe to required ROS topics
-        self.subscribe_to_topics()
 
         # Initialize and connect the MQTT client
         self.mqtt_client = mqtt.Client()
         
         try:
             self.mqtt_client.connect(host, port, MQTT_DEFAULT_TIMEOUT)
-            self.get_logger().info(f"Connected to MQTT broker at {host}:{port}")
-            
+            self.mqtt_client.on_connect = self.on_server_connection
         except Exception as e:
             self.get_logger().error(f"Failed to connect to MQTT broker: {e}")
 
         # Start MQTT client loop
         self.mqtt_client.loop_start()
+
+    def on_server_connection(self, client, userdata, flags, rc):
+        self.get_logger().info(f"Connected to MQTT broker")
+        self.subscribe_to_topics()
 
     # Sets up ROS topic subscriptions with appropriate message types and callbacks.
     def subscribe_to_topics(self) -> None:
@@ -105,7 +106,7 @@ class ros2_mqtt_publisher_t(Node):
             
             self.mqtt_client.publish(topic, payload)
             
-            self.get_logger().info(f"Published to MQTT: {payload}")
+            self.get_logger().info(f"Published to MQTT (Topic : {topic}): {payload}")
         
     def warn_malformed_data(self, data_type): 
         return self.get_logger().warn(f"Malformed {data_type} data received")
@@ -183,7 +184,7 @@ def main(args=None):
     # Main entry point for running the ROS 2 node.
     rclpy.init(args=args)
 
-    node = ros2_mqtt_publisher_t()
+    node = ros2_mqtt_publisher_t("147.83.52.40")
 
     try:
         rclpy.spin(node)  # Start processing callbacks
