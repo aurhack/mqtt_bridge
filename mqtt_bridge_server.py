@@ -6,14 +6,14 @@ from  paho.mqtt.client import MQTTMessage
 from pymongo import MongoClient
 from pymongo.server_api import ServerApi
 
+from mqtt_bridge_utils import json_default
 from ros_data import ros_data_t
 import rclpy
 from rclpy.node import Node
 
-from enum import Enum
 import threading
 import time
-from mqtt_bridge_utils import json_wrapper_encoder_t
+
 # MQTT Specs
 MQTT_DEFAULT_HOST = "localhost"
 MQTT_DEFAULT_PORT = 1883
@@ -29,12 +29,6 @@ JSON_GLOBAL_TOPIC = "global/json"
 MQTT_GLOBAL_TOPIC = "mqtt/global"
 
 # Configuration -- END
-
-# ros_data_t msg types
-class msg_type(Enum):
-    GPS = 0
-    TEMPERATURE = 1
-    NDVI = 2
 
 # ---------------------- WHOLE SOURCE STARTS HERE ----------------------
 
@@ -61,6 +55,8 @@ the specific information to be made available.
 # A helper class to store and update data from ROS messages.
 # Main class for the ROS 2 node that publishes received MQTT messages to an MQTT broker.
 # After that, we just listen with Telegraf and InfluxDB processes everything
+
+# Update, we merged databases!, we will be storing parallel data on MongoDB too
 class mqtt_data_uploader_t(Node):
     
     # Initialize the ROS 2 node, instantiate shared data container,
@@ -72,7 +68,6 @@ class mqtt_data_uploader_t(Node):
         self.ros_data = ros_data_t()
 
         # Initialize and connect the MQTT client
-        self.mqtt_client_robot = mqtt.Client()
         self.mqtt_client_server = mqtt.Client()
         
         try:
@@ -89,9 +84,6 @@ class mqtt_data_uploader_t(Node):
             self.mqtt_client_server.connect(MQTT_DEFAULT_HOST, MQTT_DEFAULT_PORT, MQTT_DEFAULT_TIMEOUT)
             self.get_logger().info(f"Connected to our MQTT client")
             
-            self.mqtt_client_robot.connect(host, port, MQTT_DEFAULT_TIMEOUT)
-            self.get_logger().info(f"Connected to Foreign MQTT broker at {host}:{port}")
-            
             # Subscribe to required MQTT topics
             self.subscribe_to_topics()
         
@@ -102,22 +94,19 @@ class mqtt_data_uploader_t(Node):
             self.get_logger().error(f"Failed to connect to MQTT broker: {e}")
             
         # Start MQTT client loop
-        self.mqtt_client_robot.loop_start()
         self.mqtt_client_server.loop_start()
 
     # Sets up ROS topic subscriptions with appropriate message types and callbacks.
     def subscribe_to_topics(self) -> None:
-        self.mqtt_client_robot.subscribe(MQTT_GLOBAL_TOPIC, qos=0)                       
-        
-        self.get_logger().info(f"Subscribed to the robot topics")
+        self.mqtt_client_server.subscribe(MQTT_GLOBAL_TOPIC, qos=0)                       
+        self.get_logger().info(f"Subscribed to the global topic")
         
         # Let the robot client get the callback so we can get the values from the topics
         # we got subscribed to
-        self.mqtt_client_robot.on_message = self.on_mqtt_message
+        self.mqtt_client_server.on_message = self.on_mqtt_message
     
     # This is the main callback to get all the data from the subscribed topics
     def on_mqtt_message(self, client, userdata, msg: MQTTMessage):
-    
         self.ros_data.update(json.loads(msg.payload.decode("utf-8")))
         
     # Publishes the given data to the specified MQTT topic.
@@ -125,7 +114,7 @@ class mqtt_data_uploader_t(Node):
     def publish(self, topic: str, data: dict) -> None:
         if data is not None:
             
-            payload = json.dumps(data, cls=json_wrapper_encoder_t, indent=4)
+            payload = json.dumps(data, indent=4)
             
             self.mqtt_client_server.publish(topic, payload)
             self.collection.insert_one(payload)
@@ -147,6 +136,7 @@ class mqtt_data_uploader_t(Node):
                 samples.append(sample)
 
         while True:
+            
             canopy_temperature_samples = []
             ndvi_samples = []
             ndvi_3d_samples = []
@@ -156,6 +146,7 @@ class mqtt_data_uploader_t(Node):
             start_time = time.time()
 
             while (time.time() - start_time) <= sampling_duration_sec:
+                
                 manage_data(rd_handler.t_canopy_temperature, canopy_temperature_samples)
                 manage_data(rd_handler.n_ndvi, ndvi_samples)
                 manage_data(rd_handler.n_ndvi_3d, ndvi_3d_samples)
@@ -167,6 +158,8 @@ class mqtt_data_uploader_t(Node):
                 **rd_handler.g_latitude.json,
                 **rd_handler.g_longitude.json,
                 **rd_handler.g_altitude.json,
+                **rd_handler.g_status.json,
+                **rd_handler.g_service.json,
 
                 "canopy_temperature_data": canopy_temperature_samples,
                 "ndvi_data": ndvi_samples,
@@ -179,12 +172,10 @@ class mqtt_data_uploader_t(Node):
                 "sensor_orientation": 0,
                 "robot_status": 0
             }
-
-            # Replace the print with your actual publish function
-        
+            
             # Publish to both MongoDB a InfluxDB!!
-            self.publish(JSON_GLOBAL_TOPIC, json_data)
-            print(json_data)
+            #self.publish(JSON_GLOBAL_TOPIC, json_data)
+            print(json.dumps(json_data, indent=4))
             #input()  # Pause, remove or replace in production
 
             # Clearing lists is unnecessary here because you recreate them each loop
@@ -194,14 +185,14 @@ def main(args=None):
     # Main entry point for running the ROS 2 node.
     rclpy.init(args=args)
 
-    node = mqtt_data_uploader_t("192.168.13.26")
+    node = mqtt_data_uploader_t()
 
     try:
         rclpy.spin(node)  # Start processing callbacks
     except KeyboardInterrupt:
         pass
     finally:
-        node.mqtt_client_robot.disconnect()
+    
         node.mqtt_client_server.disconnect()
         node.get_logger().info("Disconnected from MQTT broker.")
         node.destroy_node()

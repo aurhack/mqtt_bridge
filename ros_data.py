@@ -1,4 +1,3 @@
-
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict
@@ -16,6 +15,8 @@ class ros_data_t:
     g_latitude: float = None
     g_longitude: float = None
     g_altitude: float = None
+    g_status: int = None
+    g_service: int = None
 
     t_entity_count: str = None
     t_canopy_temperature: float = None
@@ -35,6 +36,8 @@ class ros_data_t:
             self.g_latitude = data.get("latitude")
             self.g_longitude = data.get("longitude")
             self.g_altitude = data.get("altitude")
+            self.g_status = data.get("status")
+            self.g_service = data.get("service")
 
         elif msg.find("temperature") != -1:
             
