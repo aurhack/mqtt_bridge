@@ -73,6 +73,7 @@ class ros2_mqtt_publisher_t(Node):
         try:
             self.mqtt_client.connect(host, port, MQTT_DEFAULT_TIMEOUT)
             self.mqtt_client.on_connect = self.on_server_connection
+
         except Exception as e:
             self.get_logger().error(f"Failed to connect to MQTT broker: {e}")
 
@@ -124,7 +125,9 @@ class ros2_mqtt_publisher_t(Node):
             
             "latitude": msg.latitude,
             "longitude": msg.longitude,
-            "altitude": msg.altitude
+            "altitude": msg.altitude,
+            "status": msg.status.status,
+            "service": msg.status.service,
         }
         
         self.publish(MQTT_GLOBAL_TOPIC, sanitized_data)
@@ -158,7 +161,7 @@ class ros2_mqtt_publisher_t(Node):
         found_data = re.findall(GET_FLOAT_NUMBER, msg.data)
         
         # Check if it's healthy
-        if len(found_data) <= 4:
+        if len(found_data) == 4:
             try:
                 sanitized_data = {
                     "msg_type": "ndvi",
