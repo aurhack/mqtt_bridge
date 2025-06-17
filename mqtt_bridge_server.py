@@ -161,8 +161,9 @@ class mqtt_data_uploader_t(Node):
 
     def robot_message_01(self):
         rd_handler = self.ros_data
-        sampling_duration_sec = 1  # seconds per batch
-
+        
+        # Manages data by checking if it's null, NaN and if it's not
+        # a clone
         def manage_data(sample, samples: list):
             
             if sample is None:
@@ -173,9 +174,14 @@ class mqtt_data_uploader_t(Node):
             
             if sample not in samples:
                 samples.append(sample)
-
+                
+        # Get all the data in a undefined loop
+        
+        sampling_duration_sec = 1  # seconds per batch
+        
         while True:
             
+            # All the data to be stored
             canopy_temperature_samples = []
             ndvi_samples = []
             ndvi_3d_samples = []
@@ -183,7 +189,8 @@ class mqtt_data_uploader_t(Node):
             ndvi_visible_samples = []
 
             start_time = time.time()
-
+            
+            # Get the data in the desired batch time
             while (time.time() - start_time) <= sampling_duration_sec:
                 
                 manage_data(rd_handler.t_canopy_temperature, canopy_temperature_samples)
@@ -191,7 +198,8 @@ class mqtt_data_uploader_t(Node):
                 manage_data(rd_handler.n_ndvi_3d, ndvi_3d_samples)
                 manage_data(rd_handler.n_ir, ndvi_ir_samples)
                 manage_data(rd_handler.n_visible, ndvi_visible_samples)
-
+                
+            # Final JSON result
             json_data = {
                 
                 "timestamp": rd_handler.g_timestamp,
