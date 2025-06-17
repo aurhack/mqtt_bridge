@@ -1,10 +1,14 @@
 
 import json
 import math
+import os
+import sys
 import paho.mqtt.client as mqtt
 from  paho.mqtt.client import MQTTMessage
+import psutil
 from pymongo import MongoClient
 from pymongo.server_api import ServerApi
+from pymongo.errors import ConnectionFailure 
 
 from ros_data import ros_data_t
 import rclpy
@@ -12,6 +16,28 @@ from rclpy.node import Node
 
 import threading
 import time
+
+# Secure execution ONLY, otherwise the data may be LOST.
+# IT WON'T BE PARALLEL IN MONGODB AND INFLUXDB, BE CAREFUL!!
+
+def enforce_shell_parent():
+    if os.getenv("LAUNCHED_VIA_SETUP") != "1":
+        error_msg = """
+        \033[1;91m
+        EXECUTION ERROR !
+
+        The script 'mqtt_bridge_server.py' must be launched via:
+
+            sh auto_server_setup.sh
+
+        Direct execution is disabled for system integrity.
+        \033[0m
+        """
+        
+        print(error_msg, file=sys.stderr)
+        sys.exit(1)
+
+enforce_shell_parent()
 
 # MQTT Specs
 MQTT_DEFAULT_HOST = "localhost"
@@ -68,33 +94,43 @@ class mqtt_data_uploader_t(Node):
 
         # Initialize and connect the MQTT client
         self.mqtt_client_server = mqtt.Client()
-        
+    
         try:
+            # We try to connect to Mongo DB Client
+            # MongoDB connection, we expect the connection in less than 10 seconds since is local
+            self.get_logger().info("Trying to connect to MongoDB...")
+            self.client = MongoClient(
+                "mongodb://admin:cdei2025@147.83.52.40:27017/",
+                server_api=ServerApi('1'),
+                serverSelectionTimeoutMS=10000
+            )
             
-            # Hard coded for now, don't blame 
-            self.client = MongoClient("mongodb://admin:cdei2025@192.168.13.106:27017/", server_api=ServerApi('1'))
-            self.db = self.client["ROS2"]
-            self.collection = self.db["General"]
+            # Force Ping
+            self.client.admin.command('ping')
+            self.get_logger().info("Connected to MongoDB!")
             
-            # Connect to Mongo DB Client
-            self.get_logger().info(f"Connected to MongoDB..")
-            
-            # We use our client to publish the data and we use the robot client to collect it.
+            # Get collection after successfully connecting to MongoDB
+            self.mongo_db_collection = self.client["ROS2"]["General"]
+
+            # MQTT connection
+            self.mqtt_client_server = mqtt.Client()
             self.mqtt_client_server.connect(MQTT_DEFAULT_HOST, MQTT_DEFAULT_PORT, MQTT_DEFAULT_TIMEOUT)
-            self.get_logger().info(f"Connected to our MQTT client")
             
-            # Subscribe to required MQTT topics
+            self.get_logger().info("Connected to our MQTT client")
             self.subscribe_to_topics()
         
-            thread = threading.Thread(target=self.robot_message_01)
-            thread.start()
-            
-        except Exception as e:
-            self.get_logger().error(f"Failed to connect to MQTT broker: {e}")
-            
+            # We thread out of the main thread to not stop this one 
+            threading.Thread(target=self.robot_message_01, daemon=True).start()
+
+        except ConnectionFailure as cf:
+            self.get_logger().error(f"Failed to connect to MongoDB: {cf}")
+
+        except Exception as me:
+            self.get_logger().error(f"Failed to connect to MQTT broker: {me}")
+
         # Start MQTT client loop
         self.mqtt_client_server.loop_start()
-
+        
     # Sets up ROS topic subscriptions with appropriate message types and callbacks.
     def subscribe_to_topics(self) -> None:
         self.mqtt_client_server.subscribe(MQTT_GLOBAL_TOPIC, qos=0)                       
@@ -113,12 +149,16 @@ class mqtt_data_uploader_t(Node):
     def publish(self, topic: str, data: dict) -> None:
         if data is not None:
             
+            # InfluxDB Expects JSON
             payload = json.dumps(data, indent=4)
             
             self.mqtt_client_server.publish(topic, payload)
-            self.collection.insert_one(payload)
-            self.get_logger().info(f"Published to MQTT Topic ({topic}) and MongoDB the data : {payload}")
             
+            # MongoDB Consumes straight out of the box
+            self.mongo_db_collection.insert_one(data)
+            
+            self.get_logger().info(f"Published to MQTT Topic ({topic}) and MongoDB the data : {payload}")
+
     def robot_message_01(self):
         rd_handler = self.ros_data
         sampling_duration_sec = 1  # seconds per batch
@@ -175,7 +215,8 @@ class mqtt_data_uploader_t(Node):
             
             # Publish to both MongoDB and InfluxDB!!
             #self.publish(JSON_GLOBAL_TOPIC, json_data)
-            print(json.dumps(json_data, indent=4))
+            #print(json.dumps(json_data, indent=4))
+            self.mongo_db_collection.delete_many({})
             #input()  # Pause, remove or replace in production
 
 def main(args=None):
