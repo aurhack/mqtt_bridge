@@ -24,13 +24,13 @@ def enforce_shell_parent():
     if os.getenv("LAUNCHED_VIA_SETUP") != "1":
         error_msg = """
         \033[1;91m
-        EXECUTION ERROR !
+        PROTECTED EXECUTION !
 
         The script 'mqtt_bridge_server.py' must be launched via:
 
             sh auto_server_setup.sh
 
-        Direct execution is disabled for system integrity.
+        Direct execution is disabled for avoiding the data-loss.
         \033[0m
         """
         
