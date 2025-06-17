@@ -6,7 +6,6 @@ from  paho.mqtt.client import MQTTMessage
 from pymongo import MongoClient
 from pymongo.server_api import ServerApi
 
-from mqtt_bridge_utils import json_default
 from ros_data import ros_data_t
 import rclpy
 from rclpy.node import Node
@@ -154,12 +153,13 @@ class mqtt_data_uploader_t(Node):
                 manage_data(rd_handler.n_visible, ndvi_visible_samples)
 
             json_data = {
-                **rd_handler.g_timestamp.json,
-                **rd_handler.g_latitude.json,
-                **rd_handler.g_longitude.json,
-                **rd_handler.g_altitude.json,
-                **rd_handler.g_status.json,
-                **rd_handler.g_service.json,
+                
+                "timestamp": rd_handler.g_timestamp,
+                "latitude": rd_handler.g_latitude,
+                "longitude": rd_handler.g_longitude,
+                "altitude": rd_handler.g_altitude,
+                "status": rd_handler.g_status,
+                "service": rd_handler.g_service,
 
                 "canopy_temperature_data": canopy_temperature_samples,
                 "ndvi_data": ndvi_samples,
@@ -173,13 +173,10 @@ class mqtt_data_uploader_t(Node):
                 "robot_status": 0
             }
             
-            # Publish to both MongoDB a InfluxDB!!
+            # Publish to both MongoDB and InfluxDB!!
             #self.publish(JSON_GLOBAL_TOPIC, json_data)
             print(json.dumps(json_data, indent=4))
             #input()  # Pause, remove or replace in production
-
-            # Clearing lists is unnecessary here because you recreate them each loop
-            # But if you want to clear before reuse, just do it once per outer loop iteration
 
 def main(args=None):
     # Main entry point for running the ROS 2 node.

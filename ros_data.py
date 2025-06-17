@@ -1,8 +1,4 @@
-from dataclasses import dataclass, field
-from enum import Enum
-from typing import Any, Dict
-
-from mqtt_bridge_utils import json_wrapper_t
+from dataclasses import dataclass
     
 # A helper class to store and update data from ROS messages.
 
@@ -54,11 +50,3 @@ class ros_data_t:
 
         else:
             raise ValueError(f"Unsupported msg_type: {msg}")
-
-    def __getattribute__(self, name: str) -> Any:
-        value = super().__getattribute__(name)
-        
-        if name.startswith('_') or callable(value):
-            return value
-        
-        return json_wrapper_t(name[2:], value)
