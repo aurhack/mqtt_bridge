@@ -17,7 +17,7 @@ gnome-terminal --tab --title="Telegraf" -- bash -c \
    exec bash"
 
 gnome-terminal --tab --title="MQTT Server" -- bash -c \
-  "python3 mqtt_bridge_server.py; exec bash"
+  "export LAUNCHED_VIA_SETUP=1;python3 mqtt_bridge_server.py; exec bash"
 
 # Optional: Close all tabs when scripts exit
 # gnome-terminal --wait --tab ... (would wait for completion)

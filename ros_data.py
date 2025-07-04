@@ -5,7 +5,9 @@ from dataclasses import dataclass
 @dataclass
 class ros_data_t:
     
-    # Raw fields (auto-wrapped via __getattribute__)
+    _is_data_available: bool = False
+    
+    # Raw fields
     
     g_timestamp: int = None 
     g_latitude: float = None
@@ -22,7 +24,7 @@ class ros_data_t:
     n_ndvi_3d: float = None
     n_ir: float = None
     n_visible: float = None
-
+    
     def update(self, data: dict):
         msg: str = data.get("msg_type")
         
@@ -50,3 +52,6 @@ class ros_data_t:
 
         else:
             raise ValueError(f"Unsupported msg_type: {msg}")
+        
+    def is_data_available(self) -> bool:
+        return self._is_data_available

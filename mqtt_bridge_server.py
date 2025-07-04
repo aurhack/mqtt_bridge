@@ -5,7 +5,6 @@ import os
 import sys
 import paho.mqtt.client as mqtt
 from  paho.mqtt.client import MQTTMessage
-import psutil
 from pymongo import MongoClient
 from pymongo.server_api import ServerApi
 from pymongo.errors import ConnectionFailure 
@@ -91,14 +90,14 @@ class mqtt_data_uploader_t(Node):
 
         # Instantiate shared data container
         self.ros_data = ros_data_t()
-
+        
         # Initialize and connect the MQTT client
         self.mqtt_client_server = mqtt.Client()
     
         try:
             # We try to connect to Mongo DB Client
             # MongoDB connection, we expect the connection in less than 10 seconds since is local
-            self.get_logger().info("Trying to connect to MongoDB...")
+            self.get_logger().info("Trying to connect to MongoDB [...]")
             self.client = MongoClient(
                 "mongodb://admin:cdei2025@147.83.52.40:27017/",
                 server_api=ServerApi('1'),
@@ -116,7 +115,7 @@ class mqtt_data_uploader_t(Node):
             self.mqtt_client_server = mqtt.Client()
             self.mqtt_client_server.connect(MQTT_DEFAULT_HOST, MQTT_DEFAULT_PORT, MQTT_DEFAULT_TIMEOUT)
             
-            self.get_logger().info("Connected to our MQTT client")
+            self.get_logger().info("Connected to our MQTT client!")
             self.subscribe_to_topics()
         
             # We thread out of the main thread to not stop this one 
@@ -134,7 +133,7 @@ class mqtt_data_uploader_t(Node):
     # Sets up ROS topic subscriptions with appropriate message types and callbacks.
     def subscribe_to_topics(self) -> None:
         self.mqtt_client_server.subscribe(MQTT_GLOBAL_TOPIC, qos=0)                       
-        self.get_logger().info(f"Subscribed to the global topic")
+        self.get_logger().info(f"Subscribed to the global topic!")
         
         # Let the robot client get the callback so we can get the values from the topics
         # we got subscribed to
@@ -142,6 +141,8 @@ class mqtt_data_uploader_t(Node):
     
     # This is the main callback to get all the data from the subscribed topics
     def on_mqtt_message(self, client, userdata, msg: MQTTMessage):
+        
+        self.ros_data._is_data_available = True
         self.ros_data.update(json.loads(msg.payload.decode("utf-8")))
         
     # Publishes the given data to the specified MQTT topic.
@@ -158,9 +159,24 @@ class mqtt_data_uploader_t(Node):
             self.mongo_db_collection.insert_one(data)
             
             self.get_logger().info(f"Published to MQTT Topic ({topic}) and MongoDB the data : {payload}")
-
-    def robot_message_01(self):
+    
+    # Getting data ready with this safe method! getting the rod_data raw is dangerous!
+    def secure_data_handler(self):
         rd_handler = self.ros_data
+        once = True
+        
+        while not rd_handler.is_data_available():
+            if once:
+                self.get_logger().info("Data not available at the moment, waiting [...]")
+            
+                once = False
+        
+        self.get_logger().info("Data available, proceeding [...]")
+        return self.ros_data
+    
+    def robot_message_01(self):
+        
+        rd_handler = self.secure_data_handler()
         
         # Manages data by checking if it's null, NaN and if it's not
         # a clone
@@ -222,9 +238,9 @@ class mqtt_data_uploader_t(Node):
             }
             
             # Publish to both MongoDB and InfluxDB!!
-            #self.publish(JSON_GLOBAL_TOPIC, json_data)
+            self.publish(JSON_GLOBAL_TOPIC, json_data)
             #print(json.dumps(json_data, indent=4))
-            self.mongo_db_collection.delete_many({})
+            #self.mongo_db_collection.delete_many({})
             #input()  # Pause, remove or replace in production
 
 def main(args=None):
