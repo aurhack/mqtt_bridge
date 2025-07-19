@@ -24,9 +24,9 @@ MQTT_DEFAULT_TIMEOUT = 120 #Awaiting time whenever it connects to the MQTT Servi
 
 REMITENT = "blue_robot"
 
-ROS2_TOPIC_GPS = "gps/fix"
-ROS2_TOPIC_TEMPERATURE = "/Temperature_and_CSWI/text"
-ROS2_TOPIC_NDVI = "/NDVI"
+ROS2_TOPIC_GPS = ""
+ROS2_TOPIC_TEMPERATURE = ""
+ROS2_TOPIC_NDVI = ""
 
 #ROS2_TOPIC_ENVIRONMENT = ""
 #ROS2_TOPIC_ORIENTATION  = ""
@@ -94,8 +94,6 @@ class ros2_mqtt_publisher_t(Node):
         self.create_subscription(NavSatFix, ROS2_TOPIC_GPS, self.gps_callback, qos)
         self.create_subscription(String, ROS2_TOPIC_TEMPERATURE, self.temperature_callback, qos)
         self.create_subscription(String, ROS2_TOPIC_NDVI, self.ndvi_callback, qos)
-        #self.create_subscription(Float32, ROS2_TOPIC_ORIENTATION, self.orientation_callback, qos)
-        #self.create_subscription(String, ROS2_TOPIC_ROBOT_STATUS, self.robotstatus_callback, qos)
     
    
     # Publishes the given data to the specified MQTT topic.
@@ -187,7 +185,7 @@ def main(args=None):
     # Main entry point for running the ROS 2 node.
     rclpy.init(args=args)
 
-    node = ros2_mqtt_publisher_t("147.83.52.40")
+    node = ros2_mqtt_publisher_t("") # IP HERE
 
     try:
         rclpy.spin(node)  # Start processing callbacks
