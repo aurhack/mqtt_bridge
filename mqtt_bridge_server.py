@@ -99,7 +99,7 @@ class mqtt_data_uploader_t(Node):
             # MongoDB connection, we expect the connection in less than 10 seconds since is local
             self.get_logger().info("Trying to connect to MongoDB [...]")
             self.client = MongoClient(
-                "mongodb://admin:cdei2025@147.83.52.40:27017/",
+                "",
                 server_api=ServerApi('1'),
                 serverSelectionTimeoutMS=10000
             )
